@@ -1,3 +1,7 @@
 datasets
+numpy
 pillow
+torch
+torchvision
 tqdm
+transformers

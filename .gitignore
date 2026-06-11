@@ -1,4 +1,10 @@
+models/
 outputs/
+hf_cache/
 __pycache__/
 *.pyc
+*.bin
+*.safetensors
+*.pt
+*.pth
 receipt_training_data2/
