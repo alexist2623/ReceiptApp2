@@ -8,4 +8,6 @@ __pycache__/
 *.safetensors
 *.pt
 *.pth
+*.onnx
 receipt_training_data2/
+runs/

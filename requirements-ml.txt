@@ -1,7 +1,11 @@
+accelerate
 datasets
 numpy
 pandas
 pillow
+scikit-learn
+seqeval
+tensorboard
 torch
 torchvision
 tqdm
