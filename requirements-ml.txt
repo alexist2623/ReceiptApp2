@@ -1,5 +1,6 @@
 datasets
 numpy
+pandas
 pillow
 torch
 torchvision
