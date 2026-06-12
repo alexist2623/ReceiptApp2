@@ -11,3 +11,4 @@ __pycache__/
 *.onnx
 receipt_training_data2/
 runs/
+wandb/
