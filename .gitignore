@@ -12,3 +12,6 @@ __pycache__/
 receipt_training_data2/
 runs/
 wandb/
+user_receipts/
+user_ocr_inputs/
+receipt_samples/
