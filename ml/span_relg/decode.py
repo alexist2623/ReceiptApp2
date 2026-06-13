@@ -42,6 +42,8 @@ def collect_document_summary_from_nodes(nodes):
         },
         "subtotal": {
             "subtotal_price": None,
+            "tax_name": None,
+            "tax_rate": None,
             "tax_price": None,
             "discount_price": None,
             "service_price": None,
@@ -77,7 +79,7 @@ def collect_document_summary_from_nodes(nodes):
         key = canonical_output_key(field)
         if key.startswith("store_"):
             _put_once_or_list(summary["store"], key, payload)
-        elif field in {"SUBTOTAL_PRICE", "TAX_PRICE", "DISCOUNT_PRICE", "SERVICE_PRICE"}:
+        elif field in {"SUBTOTAL_PRICE", "TAX_NAME", "TAX_RATE", "TAX_PRICE", "DISCOUNT_PRICE", "SERVICE_PRICE"}:
             _put_once_or_list(summary["subtotal"], key, payload)
         elif field in {"TOTAL_PRICE", "CASH_PRICE", "CHANGE_PRICE", "CARD_PRICE", "TIP_PRICE"}:
             _put_once_or_list(summary["total"], key, payload)

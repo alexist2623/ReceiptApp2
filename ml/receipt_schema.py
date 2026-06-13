@@ -40,6 +40,8 @@ ITEM_FIELDS = [
 
 SUMMARY_FIELDS = [
     "SUBTOTAL_PRICE",
+    "TAX_NAME",
+    "TAX_RATE",
     "TAX_PRICE",
     "DISCOUNT_PRICE",
     "SERVICE_PRICE",
@@ -276,6 +278,8 @@ def canonical_output_key(field: str | None) -> str:
         "ITEM_TAX_FLAG": "tax_flag",
         "ITEM_ETC": "item_etc",
         "SUBTOTAL_PRICE": "subtotal_price",
+        "TAX_NAME": "tax_name",
+        "TAX_RATE": "tax_rate",
         "TAX_PRICE": "tax_price",
         "DISCOUNT_PRICE": "discount_price",
         "SERVICE_PRICE": "service_price",

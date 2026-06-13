@@ -33,6 +33,8 @@ HARD_NEGATIVE_FIELDS = [
     "TIME",
     "RECEIPT_ID",
     "SUBTOTAL_PRICE",
+    "TAX_NAME",
+    "TAX_RATE",
     "TAX_PRICE",
     "DISCOUNT_PRICE",
     "SERVICE_PRICE",
