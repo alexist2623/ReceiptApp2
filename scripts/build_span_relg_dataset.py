@@ -224,10 +224,22 @@ def main():
         "field2id": field2id,
         "kind2id": kind2id,
         "hidden_dim": hidden_dim,
-        "candidate_head_fields": ["MENU_NM"],
+        "candidate_head_fields": ["ITEM_NAME"],
+        "candidate_dep_fields": [
+            "ITEM_PRICE",
+            "ITEM_QTY",
+            "ITEM_UNIT_PRICE",
+            "ITEM_CODE",
+            "ITEM_SKU",
+            "ITEM_DISCOUNT",
+            "ITEM_OPTION",
+            "ITEM_TAX_FLAG",
+            "ITEM_ETC",
+        ],
         "notes": [
             "LayoutLMv3 is used only as a frozen feature extractor.",
             "Pair labels are binary same-group rel-g labels, not group_id classes.",
+            "Old CORD MENU_* labels are canonicalized to receipt schema v2 ITEM_* fields.",
             "No rel-s or token serialization is implemented here.",
         ],
     }

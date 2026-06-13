@@ -86,5 +86,10 @@ The image used for OCR and the image sent to the computer are the same upright c
 
 - Do not split line text manually to create words.
 - Use ML Kit text elements as word-like units.
+- Do not merge OCR tokens. If OCR emits `$` and `16.99` as separate elements,
+  keep both elements as separate `words`.
+- Price splitting is handled later by BIO labels and span normalization. For
+  example, label `$` as `B-ITEM_PRICE` and `16.99` as `I-ITEM_PRICE`; the Python
+  span layer can normalize the recovered span to `$16.99`.
 - Clamp boxes to the canonical image bounds.
 - Skip empty text and boxes that cannot be recovered from bounding boxes or corner points.

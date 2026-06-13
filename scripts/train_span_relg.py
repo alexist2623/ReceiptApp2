@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument(
         "--best_metric",
         default="menu_price_pair_f1",
-        choices=("menu_price_pair_f1", "edge_f1", "eval_loss"),
+        choices=("item_price_pair_f1", "menu_price_pair_f1", "edge_f1", "eval_loss"),
         help="Metric used to save best/. eval_loss is minimized; F1 metrics are maximized.",
     )
     parser.add_argument(
@@ -415,9 +415,13 @@ def main():
         final_loss = train_loss
         eval_metrics, eval_samples, probs_by_sample = evaluate(model, val_loader, device, args.threshold)
         edge_f1 = eval_metrics.get("edge", {}).get("f1", 0.0)
-        menu_price_f1 = eval_metrics.get("menu_price_pair", {}).get("f1", 0.0)
+        item_price_metric = eval_metrics.get("item_price_pair", eval_metrics.get("menu_price_pair", {}))
+        menu_price_metric = eval_metrics.get("menu_price_pair", item_price_metric)
+        item_price_f1 = item_price_metric.get("f1", 0.0)
+        menu_price_f1 = menu_price_metric.get("f1", item_price_f1)
         metric_values = {
             "edge_f1": edge_f1,
+            "item_price_pair_f1": item_price_f1,
             "menu_price_pair_f1": menu_price_f1,
             "eval_loss": eval_metrics.get("eval_loss"),
         }
@@ -432,9 +436,12 @@ def main():
             "train_loss": train_loss,
             "eval_loss": eval_metrics.get("eval_loss"),
             "edge_f1": edge_f1,
+            "item_price_pair_f1": item_price_f1,
+            "item_price_pair_precision": item_price_metric.get("precision", 0.0),
+            "item_price_pair_recall": item_price_metric.get("recall", 0.0),
             "menu_price_pair_f1": menu_price_f1,
-            "menu_price_pair_precision": eval_metrics.get("menu_price_pair", {}).get("precision", 0.0),
-            "menu_price_pair_recall": eval_metrics.get("menu_price_pair", {}).get("recall", 0.0),
+            "menu_price_pair_precision": menu_price_metric.get("precision", 0.0),
+            "menu_price_pair_recall": menu_price_metric.get("recall", 0.0),
             "best_metric": args.best_metric,
             "best_metric_value": score,
             "best_so_far": best_so_far,

@@ -16,10 +16,14 @@ The Android app currently handles:
 The app does not yet run:
 
 - LayoutLMv3 inference,
-- MENU_NM or MENU_PRICE prediction logic beyond OCR,
+- ITEM_NAME/ITEM_PRICE or legacy MENU_NM/MENU_PRICE prediction logic beyond OCR,
 - span-level rel-g grouping,
 - group_id prediction,
 - heuristic item-price grouping.
+
+The app preserves ML Kit element-level raw OCR tokens. It does not merge tokens
+such as `$` and `16.99`, and it does not split line text manually. Receipt schema
+v2 labels and BIO span normalization are applied later in the computer pipeline.
 
 ## Why Inference Is Abstracted
 

@@ -10,6 +10,12 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForTokenClassification, AutoProcessor
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from ml.receipt_schema import canonicalize_label, label_to_field
+
 from infer_user_ocr_json import (
     compare_model_labels,
     fail,
@@ -21,6 +27,7 @@ from infer_user_ocr_json import (
     save_json,
     save_overlay,
     select_device,
+    raw_label_to_field,
 )
 
 
@@ -259,13 +266,18 @@ def process_pair(pair, args, processor, model, device, id2label, out_dir):
 
     predictions = []
     for idx, word in enumerate(words):
+        raw_label = pred_labels[idx]
+        canonical_label = canonicalize_label(raw_label)
         predictions.append(
             {
                 "word_idx": idx,
                 "text": word,
                 "box": pixel_boxes[idx],
                 "normalized_box": normalized_boxes[idx],
-                "label": pred_labels[idx],
+                "label": raw_label,
+                "canonical_label": canonical_label,
+                "field": raw_label_to_field(raw_label),
+                "canonical_field": label_to_field(canonical_label),
                 "confidence": confidences[idx],
                 "source": metadata[idx]["source"],
                 "line_index": metadata[idx]["line_index"],

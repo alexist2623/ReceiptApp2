@@ -81,10 +81,10 @@ def _field_prob(value):
 
 
 def draw_user_item_mapping_overlay(image, items, out_path, title=None):
-    """Draw a clean user-facing menu -> price overlay.
+    """Draw a clean user-facing item -> price overlay.
 
     Unlike the graph-debug overlay, this view shows only decoded item mappings:
-    menu boxes, price boxes, optional count/unit-price boxes, and a side table.
+    item boxes, price boxes, optional quantity/unit-price boxes, and a side table.
     """
     base = image.copy().convert("RGB")
     panel_width = max(980, int(base.width * 0.36))
@@ -117,10 +117,10 @@ def draw_user_item_mapping_overlay(image, items, out_path, title=None):
 
     panel_x = base.width
     draw.rectangle([panel_x, 0, output.width - 1, output.height - 1], fill=(248, 250, 252), outline=(203, 213, 225))
-    draw.text((panel_x + 28, 26), "Menu -> Price Mapping", fill=(15, 23, 42), font=title_font)
+    draw.text((panel_x + 28, 26), "Item -> Price Mapping", fill=(15, 23, 42), font=title_font)
     draw.text(
         (panel_x + 28, 78),
-        "Blue box = menu span, green box = linked price. Red row = no price.",
+        "Blue box = item span, green box = linked price. Red row = no price.",
         fill=(71, 85, 105),
         font=small_font,
     )
@@ -131,9 +131,9 @@ def draw_user_item_mapping_overlay(image, items, out_path, title=None):
             continue
         item_index = item.get("item_index", 0)
         color = palette[int(item_index or 0) % len(palette)]
-        menu = item.get("menu_name") or item.get("name")
+        menu = item.get("item_name") or item.get("menu_name") or item.get("name")
         price = item.get("price") or item.get("menu_price")
-        count = item.get("count")
+        count = item.get("quantity") or item.get("count")
         unit_price = item.get("unit_price")
         warnings = item.get("warnings") or []
         menu_text = _field_text(menu)
@@ -147,7 +147,7 @@ def draw_user_item_mapping_overlay(image, items, out_path, title=None):
             _draw_text_box(
                 draw,
                 (menu_box[0], max(0, menu_box[1] - 34)),
-                f"#{item_index} MENU",
+                f"#{item_index} ITEM",
                 color,
                 tag_font,
                 background=(255, 255, 255),
@@ -232,7 +232,7 @@ def draw_span_relg_overlay(image, sample, edges, out_path, title=None):
     for node in nodes:
         if node.get("node_kind") != "SPAN":
             continue
-        color = (30, 120, 210) if node.get("field") == "MENU_NM" else (80, 80, 80)
+        color = (30, 120, 210) if node.get("field") in {"ITEM_NAME", "MENU_NM"} else (80, 80, 80)
         _draw_rect(draw, node["box"], color, width=2)
         draw.text((node["box"][0], max(0, node["box"][1] - 12)), f"{node['field']} {node['text'][:18]}", fill=color, font=font)
 

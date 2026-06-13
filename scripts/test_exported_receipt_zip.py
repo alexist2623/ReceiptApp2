@@ -493,7 +493,7 @@ def validate_grouped_json(path):
             continue
         if not (item.get("price") or item.get("menu_price")):
             price_missing += 1
-        if not (item.get("menu_name") or item.get("name")):
+        if not (item.get("item_name") or item.get("menu_name") or item.get("name")):
             menu_missing += 1
         if item.get("rel_g_prob") is not None:
             try:
@@ -543,10 +543,11 @@ def grouped_mapping_rows(row):
             {
                 "capture_id": row.get("capture_id", ""),
                 "item_index": item.get("item_index"),
-                "menu_name": field_text(item.get("menu_name") or item.get("name")),
+                "item_name": field_text(item.get("item_name") or item.get("menu_name") or item.get("name")),
+                "menu_name": field_text(item.get("menu_name") or item.get("item_name") or item.get("name")),
                 "price": field_text(price),
                 "price_rel_prob": field_prob(price),
-                "count": field_text(item.get("count")),
+                "quantity": field_text(item.get("quantity") or item.get("count")),
                 "unit_price": field_text(item.get("unit_price")),
                 "warnings": "; ".join(item.get("warnings") or []),
             }
@@ -563,10 +564,11 @@ def write_mapping_outputs(out_dir, rows):
     fieldnames = [
         "capture_id",
         "item_index",
+        "item_name",
         "menu_name",
         "price",
         "price_rel_prob",
-        "count",
+        "quantity",
         "unit_price",
         "warnings",
     ]
@@ -576,20 +578,20 @@ def write_mapping_outputs(out_dir, rows):
         for item in mapping_rows:
             writer.writerow(item)
     lines = [
-        "# Menu Price Mapping",
+        "# Item Price Mapping",
         "",
-        "| capture_id | item | menu_name | price | price_rel_prob | count | unit_price | warnings |",
+        "| capture_id | item | item_name | price | price_rel_prob | quantity | unit_price | warnings |",
         "|---|---:|---|---|---:|---|---|---|",
     ]
     for item in mapping_rows:
         lines.append(
-            "| {capture_id} | {item_index} | {menu_name} | {price} | {price_rel_prob} | {count} | {unit_price} | {warnings} |".format(
+            "| {capture_id} | {item_index} | {item_name} | {price} | {price_rel_prob} | {quantity} | {unit_price} | {warnings} |".format(
                 capture_id=str(item.get("capture_id", "")).replace("|", "\\|"),
                 item_index=item.get("item_index", ""),
-                menu_name=str(item.get("menu_name", "")).replace("|", "\\|"),
+                item_name=str(item.get("item_name") or item.get("menu_name", "")).replace("|", "\\|"),
                 price=str(item.get("price", "")).replace("|", "\\|"),
                 price_rel_prob="" if item.get("price_rel_prob") is None else f"{item['price_rel_prob']:.4f}",
-                count=str(item.get("count", "")).replace("|", "\\|"),
+                quantity=str(item.get("quantity", "")).replace("|", "\\|"),
                 unit_price=str(item.get("unit_price", "")).replace("|", "\\|"),
                 warnings=str(item.get("warnings", "")).replace("|", "\\|"),
             )
@@ -649,7 +651,7 @@ def write_html_gallery(path, rows, out_dir):
         if mapping_rows:
             mapping_table = """
   <table>
-    <thead><tr><th>#</th><th>Menu name</th><th>Price</th><th>Rel prob</th><th>Count</th><th>Unit price</th><th>Warnings</th></tr></thead>
+    <thead><tr><th>#</th><th>Item name</th><th>Price</th><th>Rel prob</th><th>Quantity</th><th>Unit price</th><th>Warnings</th></tr></thead>
     <tbody>
 """
             for item in mapping_rows:
@@ -657,24 +659,24 @@ def write_html_gallery(path, rows, out_dir):
                 mapping_table += (
                     "      <tr>"
                     f"<td>{html.escape(str(item.get('item_index', '')))}</td>"
-                    f"<td>{html.escape(str(item.get('menu_name', '')))}</td>"
+                    f"<td>{html.escape(str(item.get('item_name') or item.get('menu_name', '')))}</td>"
                     f"<td>{html.escape(str(item.get('price', '')))}</td>"
                     f"<td>{html.escape(prob)}</td>"
-                    f"<td>{html.escape(str(item.get('count', '')))}</td>"
+                    f"<td>{html.escape(str(item.get('quantity', '')))}</td>"
                     f"<td>{html.escape(str(item.get('unit_price', '')))}</td>"
                     f"<td>{html.escape(str(item.get('warnings', '')))}</td>"
                     "</tr>\n"
                 )
             mapping_table += "    </tbody>\n  </table>"
         else:
-            mapping_table = "<p>No grouped menu-price mapping available.</p>"
+            mapping_table = "<p>No grouped item-price mapping available.</p>"
         cards.append(
             f"""
 <section class="card">
   <h2>{html.escape(row['capture_id'])}</h2>
   <p>words={row.get('word_count')} invalid_boxes={row.get('invalid_box_count')} items={row.get('item_count')}</p>
   <p><a href="{ocr_json}">OCR JSON</a> | <a href="{grouped}">Grouped JSON</a></p>
-  <h3>Menu -> Price Mapping</h3>
+  <h3>Item -> Price Mapping</h3>
   {mapping_table}
   <div class="images">
     <figure><figcaption>OCR box overlay</figcaption><img src="{ocr_overlay}" alt="OCR overlay"></figure>

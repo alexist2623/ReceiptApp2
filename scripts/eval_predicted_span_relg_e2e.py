@@ -23,6 +23,7 @@ from ml.span_relg.model import SpanRelGModel
 from ml.span_relg.schema import ALL_FIELDS, is_candidate_dep_field, is_dependent_field, is_head_field
 from ml.span_relg.span_utils import bio_predictions_to_spans
 from ml.span_relg.visualization import draw_span_relg_overlay
+from ml.receipt_schema import canonicalize_field, field_for_vocab
 
 
 THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -247,13 +248,15 @@ def filter_candidate_spans(spans, field2id):
     kept = []
     dropped = []
     for span in spans:
-        field = span.get("field")
-        if field not in field2id:
+        field = canonicalize_field(span.get("field"))
+        if field_for_vocab(field, field2id) is None:
             dropped.append({"field": field, "text": span.get("text"), "reason": "field_not_in_vocab"})
             continue
         if not (is_head_field(field) or is_candidate_dep_field(field)):
             dropped.append({"field": field, "text": span.get("text"), "reason": "not_relg_candidate"})
             continue
+        span = dict(span)
+        span["field"] = field
         kept.append(span)
     for span_id, span in enumerate(kept):
         span["span_id"] = span_id
@@ -261,9 +264,10 @@ def filter_candidate_spans(spans, field2id):
 
 
 def span_metric_counts(data_id, spans, gold_lines, field):
-    pred = [span for span in spans if span.get("field") == field]
-    gold = [line for line in gold_lines if line.get("field") == field]
-    correct_pred = [span for span in pred if span.get("matched_gold_field") == field]
+    field = canonicalize_field(field)
+    pred = [span for span in spans if canonicalize_field(span.get("field")) == field]
+    gold = [line for line in gold_lines if canonicalize_field(line.get("field")) == field]
+    correct_pred = [span for span in pred if canonicalize_field(span.get("matched_gold_field")) == field]
     matched_gold = {
         (data_id, span.get("matched_gold_line_id"))
         for span in correct_pred
@@ -319,7 +323,8 @@ def simple_item(item):
         return value.get("text") if isinstance(value, dict) else value
 
     return {
-        "menu_name": text(item.get("menu_name")),
+        "item_name": text(item.get("item_name") or item.get("menu_name")),
+        "menu_name": text(item.get("menu_name") or item.get("item_name")),
         "price": text(item.get("price")),
         "count": text(item.get("count")),
         "unit_price": text(item.get("unit_price")),
@@ -335,10 +340,11 @@ def decoded_item_errors(samples, probs_by_sample, threshold):
     for sample, probs in zip(samples, probs_by_sample):
         decoded = decode_edges_to_items(sample, probs, threshold=threshold)
         for item in decoded.get("items", []):
-            menu_text = item.get("menu_name", {}).get("text") if isinstance(item.get("menu_name"), dict) else item.get("menu_name")
+            name_value = item.get("item_name") or item.get("menu_name")
+            menu_text = name_value.get("text") if isinstance(name_value, dict) else name_value
             if item.get("price") is None:
                 no_price.append({"data_id": sample.get("data_id"), "index": sample.get("index"), "menu_name": menu_text, "item": simple_item(item)})
-            price_edges = [edge for edge in item.get("rel_g_edges", []) if edge.get("dep_field") == "MENU_PRICE"]
+            price_edges = [edge for edge in item.get("rel_g_edges", []) if edge.get("dep_field") in {"ITEM_PRICE", "MENU_PRICE"}]
             if len(price_edges) > 1:
                 multiple_price.append({"data_id": sample.get("data_id"), "index": sample.get("index"), "menu_name": menu_text, "price_edges": price_edges})
         selected_by_dep = {}
@@ -389,20 +395,27 @@ def summarize_metrics(args, samples, probs_by_sample, threshold, word_counts, sp
         "num_samples": len(samples),
         "threshold": threshold,
         "word_label_accuracy": word_counts["correct"] / word_counts["total"] if word_counts["total"] else 0.0,
-        "menu_nm_span_precision": span_precision("MENU_NM"),
-        "menu_nm_span_recall": span_recall("MENU_NM"),
-        "menu_price_span_precision": span_precision("MENU_PRICE"),
-        "menu_price_span_recall": span_recall("MENU_PRICE"),
+        "item_name_span_precision": span_precision("ITEM_NAME"),
+        "item_name_span_recall": span_recall("ITEM_NAME"),
+        "item_price_span_precision": span_precision("ITEM_PRICE"),
+        "item_price_span_recall": span_recall("ITEM_PRICE"),
+        "menu_nm_span_precision": span_precision("ITEM_NAME"),
+        "menu_nm_span_recall": span_recall("ITEM_NAME"),
+        "menu_price_span_precision": span_precision("ITEM_PRICE"),
+        "menu_price_span_recall": span_recall("ITEM_PRICE"),
         "num_candidate_pairs": len(labels),
         "num_positive_pairs": sum(labels),
         "num_negative_pairs": len(labels) - sum(labels),
         "edge_precision": metrics["edge"]["precision"],
         "edge_recall": metrics["edge"]["recall"],
         "edge_f1": metrics["edge"]["f1"],
+        "item_price_pair_precision": metrics.get("item_price_pair", metrics["menu_price_pair"])["precision"],
+        "item_price_pair_recall": metrics.get("item_price_pair", metrics["menu_price_pair"])["recall"],
+        "item_price_pair_f1": metrics.get("item_price_pair", metrics["menu_price_pair"])["f1"],
         "menu_price_pair_precision": metrics["menu_price_pair"]["precision"],
         "menu_price_pair_recall": metrics["menu_price_pair"]["recall"],
         "menu_price_pair_f1": metrics["menu_price_pair"]["f1"],
-        "e2e_item_price_pair_f1": metrics["menu_price_pair"]["f1"],
+        "e2e_item_price_pair_f1": metrics.get("item_price_pair", metrics["menu_price_pair"])["f1"],
         "hard_negative_false_positive_count": metrics["hard_negative_false_positive_count"],
         "total_subtotal_false_positive_count": metrics["hard_negative_false_positive_count"],
         "dependent_collision_count": metrics["dependent_collision_count"],
@@ -586,8 +599,8 @@ def main():
     probs_by_sample = []
     word_counts = Counter()
     span_counts = {
-        "MENU_NM": {"pred": 0, "gold": 0, "correct_pred": 0, "matched_gold": set()},
-        "MENU_PRICE": {"pred": 0, "gold": 0, "correct_pred": 0, "matched_gold": set()},
+        "ITEM_NAME": {"pred": 0, "gold": 0, "correct_pred": 0, "matched_gold": set()},
+        "ITEM_PRICE": {"pred": 0, "gold": 0, "correct_pred": 0, "matched_gold": set()},
     }
     failure_cases = []
     gallery_cards = []
@@ -621,7 +634,7 @@ def main():
                 spans = bio_predictions_to_spans(predictions, extracted["width"], extracted["height"])
                 match_predicted_spans(spans, extracted["lines"])
                 filtered_spans, dropped_spans = filter_candidate_spans(spans, field2id)
-                for field in ("MENU_NM", "MENU_PRICE"):
+                for field in ("ITEM_NAME", "ITEM_PRICE"):
                     counts = span_metric_counts(data_id, filtered_spans, extracted["lines"], field)
                     span_counts[field]["pred"] += counts["pred"]
                     span_counts[field]["gold"] += counts["gold"]
@@ -688,7 +701,7 @@ def main():
                     debug_path = overlay_dir / f"{data_id}_pred_span_relg_debug.json"
                     draw_span_relg_overlay(extracted["image"], cache, overlay_edges, overlay_path, title=f"{data_id} predicted span rel-g")
                     hard_count = sum(1 for edge in pred_edges if edge.get("hard_negative"))
-                    menu_price_correct = sum(1 for edge in pred_edges if edge.get("dep_field") == "MENU_PRICE" and edge.get("correct"))
+                    menu_price_correct = sum(1 for edge in pred_edges if edge.get("dep_field") in {"ITEM_PRICE", "MENU_PRICE"} and edge.get("correct"))
                     save_json(
                         debug_path,
                         {

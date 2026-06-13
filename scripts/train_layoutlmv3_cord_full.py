@@ -28,6 +28,10 @@ def parse_args():
     )
     parser.add_argument("--bio_dir", default="processed_data/cord_bio")
     parser.add_argument("--raw_data_dir", default="../receipt_training_data2")
+    parser.add_argument("--label_schema", default=None, help="Optional labels schema JSON, e.g. schemas/receipt_labels_v2.json.")
+    parser.add_argument("--user_labeled_jsonl", default=None, help="Reserved for future schema-v2 user labeled JSONL fine-tuning.")
+    parser.add_argument("--init_from_checkpoint", default=None, help="Reserved for initializing from an existing fine-tuned checkpoint.")
+    parser.add_argument("--copy_old_classifier_rows", action="store_true", help="Reserved for alias-based classifier row initialization.")
     parser.add_argument("--model_name_or_path", default="microsoft/layoutlmv3-base")
     parser.add_argument("--local_files_only", action="store_true")
     parser.add_argument("--output_dir", default="models/layoutlmv3-cord-full")
@@ -95,9 +99,9 @@ def ensure_pil_rgb(image):
     raise TypeError(f"Unsupported image type: {type(image)}")
 
 
-def load_labels(bio_dir):
-    labels_path = Path(bio_dir) / "labels.json"
-    require_path(labels_path, f"{labels_path} not found. Run step 3 first.")
+def load_labels(bio_dir, label_schema=None):
+    labels_path = Path(label_schema) if label_schema else Path(bio_dir) / "labels.json"
+    require_path(labels_path, f"{labels_path} not found. Run step 3 first or export schema v2.")
     with labels_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
@@ -794,7 +798,7 @@ def main():
     require_path(Path(args.bio_dir) / "labels.json", f"{args.bio_dir}/labels.json not found. Run step 3 first.")
     require_path(args.raw_data_dir, f"{args.raw_data_dir} not found. Run CORD-v2 download step first.")
 
-    label_list, label2id, id2label, labels_payload = load_labels(args.bio_dir)
+    label_list, label2id, id2label, labels_payload = load_labels(args.bio_dir, args.label_schema)
     train_records = load_bio_records(args.bio_dir, "train", label2id, args.max_train_samples)
     validation_records = load_bio_records(args.bio_dir, "validation", label2id, args.max_eval_samples)
 

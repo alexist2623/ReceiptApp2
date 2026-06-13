@@ -119,7 +119,7 @@ outputs/exported_receipt_zip_test/
 1. OCR overlay boxes align with the text in the image.
 2. JSON `image_width` / `image_height` match the actual saved image size.
 3. `words[].box` is `[left, top, right, bottom]` in saved image pixels.
-4. LayoutLMv3 overlay labels such as `MENU_NM` and `MENU_PRICE` look plausible.
+4. LayoutLMv3 overlay labels such as `ITEM_NAME`/`ITEM_PRICE` look plausible. Legacy `MENU_NM`/`MENU_PRICE` labels are still accepted as aliases.
 5. Grouped rel-g JSON connects item names and prices correctly.
 
 ## Troubleshooting

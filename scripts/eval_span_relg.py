@@ -239,7 +239,8 @@ def flattened_metrics(metrics, samples, probs_by_sample, threshold, eval_loss, s
         labels.extend(int(v.item()) for v in sample["pair_labels"])
     no_price, multiple_price, collision_errors = decoded_item_errors(samples, probs_by_sample, threshold)
     edge = metrics.get("edge", {})
-    menu_price = metrics.get("menu_price_pair", {})
+    item_price = metrics.get("item_price_pair", metrics.get("menu_price_pair", {}))
+    menu_price = metrics.get("menu_price_pair", item_price)
     field_edges = metrics.get("field_edges", {})
     return {
         "split": split,
@@ -252,12 +253,19 @@ def flattened_metrics(metrics, samples, probs_by_sample, threshold, eval_loss, s
         "edge_precision": edge.get("precision", 0.0),
         "edge_recall": edge.get("recall", 0.0),
         "edge_f1": edge.get("f1", 0.0),
+        "item_price_pair_precision": item_price.get("precision", 0.0),
+        "item_price_pair_recall": item_price.get("recall", 0.0),
+        "item_price_pair_f1": item_price.get("f1", 0.0),
         "menu_price_pair_precision": menu_price.get("precision", 0.0),
         "menu_price_pair_recall": menu_price.get("recall", 0.0),
         "menu_price_pair_f1": menu_price.get("f1", 0.0),
-        "menu_cnt_pair_f1": field_edges.get("MENU_CNT", {}).get("f1", 0.0),
-        "menu_unitprice_pair_f1": field_edges.get("MENU_UNITPRICE", {}).get("f1", 0.0),
+        "item_qty_pair_f1": field_edges.get("ITEM_QTY", field_edges.get("MENU_CNT", {})).get("f1", 0.0),
+        "item_unit_price_pair_f1": field_edges.get("ITEM_UNIT_PRICE", field_edges.get("MENU_UNITPRICE", {})).get("f1", 0.0),
+        "menu_cnt_pair_f1": field_edges.get("ITEM_QTY", field_edges.get("MENU_CNT", {})).get("f1", 0.0),
+        "menu_unitprice_pair_f1": field_edges.get("ITEM_UNIT_PRICE", field_edges.get("MENU_UNITPRICE", {})).get("f1", 0.0),
         "hard_negative_false_positive_count": metrics.get("hard_negative_false_positive_count", 0),
+        "store_false_positive_count": metrics.get("store_false_positive_count", 0),
+        "total_subtotal_false_positive_count": metrics.get("total_subtotal_false_positive_count", 0),
         "dependent_collision_count": metrics.get("dependent_collision_count", 0),
         "no_price_item_count": len(no_price),
         "multiple_price_item_count": len(multiple_price),

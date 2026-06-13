@@ -9,9 +9,24 @@ import torch
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from transformers import AutoModelForTokenClassification, AutoProcessor
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from ml.receipt_schema import canonicalize_label, label_to_field
+
 
 BOX_KEYS = ("box", "bbox", "bounding_box", "boundingBox", "rect", "quad", "vertices")
 TEXT_KEYS = ("text", "value", "word", "description")
+
+
+def raw_label_to_field(label):
+    value = str(label or "O").strip()
+    if not value or value == "O":
+        return "O"
+    if value.startswith(("B-", "I-")):
+        value = value[2:]
+    return value.upper().replace(".", "_").replace("-", "_").replace("/", "_").replace(" ", "_")
 
 
 def parse_args():
@@ -726,13 +741,18 @@ def main():
 
     predictions = []
     for idx, word in enumerate(words):
+        raw_label = pred_labels[idx]
+        canonical_label = canonicalize_label(raw_label)
         predictions.append(
             {
                 "word_idx": idx,
                 "text": word,
                 "box": pixel_boxes[idx],
                 "normalized_box": normalized_boxes[idx],
-                "label": pred_labels[idx],
+                "label": raw_label,
+                "canonical_label": canonical_label,
+                "field": raw_label_to_field(raw_label),
+                "canonical_field": label_to_field(canonical_label),
                 "confidence": confidences[idx],
                 "source": metadata[idx]["source"],
                 "line_index": metadata[idx]["line_index"],

@@ -24,6 +24,10 @@ def parse_args():
     )
     parser.add_argument("--bio_dir", default="processed_data/cord_bio")
     parser.add_argument("--raw_data_dir", default="../receipt_training_data2")
+    parser.add_argument("--label_schema", default=None, help="Optional labels schema JSON, e.g. schemas/receipt_labels_v2.json.")
+    parser.add_argument("--user_labeled_jsonl", default=None, help="Reserved for future schema-v2 user labeled JSONL overfit tests.")
+    parser.add_argument("--init_from_checkpoint", default=None, help="Reserved for initializing from an existing fine-tuned checkpoint.")
+    parser.add_argument("--copy_old_classifier_rows", action="store_true", help="Reserved for alias-based classifier row initialization.")
     parser.add_argument("--split", default="train")
     parser.add_argument("--num_samples", type=int, default=10)
     parser.add_argument("--start_index", type=int, default=0)
@@ -67,9 +71,9 @@ def require_path(path, message):
         fail(message)
 
 
-def load_labels(bio_dir):
-    labels_path = Path(bio_dir) / "labels.json"
-    require_path(labels_path, f"{labels_path} not found. Run step 3 first.")
+def load_labels(bio_dir, label_schema=None):
+    labels_path = Path(label_schema) if label_schema else Path(bio_dir) / "labels.json"
+    require_path(labels_path, f"{labels_path} not found. Run step 3 first or export schema v2.")
     with labels_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
@@ -604,7 +608,7 @@ def main():
     require_path(Path(args.bio_dir) / "labels.json", f"{args.bio_dir}/labels.json not found. Run step 3 first.")
     require_path(args.raw_data_dir, f"{args.raw_data_dir} not found. Run CORD-v2 download step first.")
 
-    label_list, label2id, id2label, labels_payload = load_labels(args.bio_dir)
+    label_list, label2id, id2label, labels_payload = load_labels(args.bio_dir, args.label_schema)
     records = load_bio_records(args.bio_dir, args.split, args.start_index, args.num_samples, label2id)
     raw_dataset = load_raw_dataset(args.raw_data_dir, args.split)
     raw_split = raw_dataset[args.split]

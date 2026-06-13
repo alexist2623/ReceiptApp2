@@ -3,6 +3,7 @@ from transformers import AutoModelForTokenClassification, AutoProcessor
 
 from .geometry import box1000_to_unit, pair_geometry_dim, pair_geometry_features
 from .schema import CONTEXT_FIELD, is_candidate_dep_field, is_dependent_field, is_head_field
+from ml.receipt_schema import canonicalize_field, field_for_vocab
 from .span_utils import span_pool_hidden
 
 
@@ -81,12 +82,15 @@ def make_nodes(sample_info, word_hidden, include_context_tokens="all", span_pool
     nodes = []
     covered_words = set()
     for span in sample_info["spans"]:
+        field = canonicalize_field(span.get("field"))
         hidden = span_pool_hidden(word_hidden, span["word_indices"], span_pooling)
         node = {
             "node_id": len(nodes),
             "node_kind": "SPAN",
-            "field": span["field"],
+            "field": field,
+            "raw_field": span.get("raw_field", span.get("field")),
             "text": span["text"],
+            "normalized_text": span.get("normalized_text", span.get("text")),
             "word_indices": list(span["word_indices"]),
             "first_word_idx": int(span["first_word_idx"]),
             "box": span["box"],
@@ -163,6 +167,13 @@ def make_candidate_pairs(nodes):
     return pairs, labels, pair_fields, pair_meta, pair_geom
 
 
+def _field_id_for_node(node, field2id):
+    field_key = field_for_vocab(node["field"], field2id)
+    if field_key is None:
+        raise KeyError(f"Field {node['field']} is not present in rel-g field vocab.")
+    return field2id[field_key]
+
+
 def build_cache_sample(
     data_id,
     split,
@@ -189,7 +200,7 @@ def build_cache_sample(
             for node in nodes
         ],
         "node_hidden": node_hidden,
-        "node_field_ids": torch.tensor([field2id[node["field"]] for node in nodes], dtype=torch.long),
+        "node_field_ids": torch.tensor([_field_id_for_node(node, field2id) for node in nodes], dtype=torch.long),
         "node_kind_ids": torch.tensor([kind2id[node["node_kind"]] for node in nodes], dtype=torch.long),
         "node_boxes": (
             torch.tensor([node["box_unit"] for node in nodes], dtype=torch.float32)

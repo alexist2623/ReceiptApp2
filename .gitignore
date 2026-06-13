@@ -15,6 +15,7 @@ wandb/
 user_receipts/
 user_ocr_inputs/
 receipt_samples/
+labeling/
 ReceiptApp/.gradle/
 ReceiptApp/.idea/
 ReceiptApp/**/build/

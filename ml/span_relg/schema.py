@@ -1,29 +1,52 @@
-HEAD_FIELDS = ["MENU_NM"]
+"""Span-level rel-g schema backed by the canonical receipt schema."""
+
+from ml.receipt_schema import (
+    PAYMENT_FIELDS,
+    SUMMARY_FIELDS,
+    canonical_output_key,
+    canonicalize_field,
+    field_for_vocab,
+    is_hard_negative_for_item_grouping,
+    is_item_dependent_field,
+    is_item_head_field,
+)
+
+HEAD_FIELDS = ["ITEM_NAME"]
 
 DEP_FIELDS = [
-    "MENU_PRICE",
-    "MENU_CNT",
-    "MENU_UNITPRICE",
-    "MENU_DISCOUNTPRICE",
-    "MENU_ITEMSUBTOTAL",
-    "MENU_SUB_NM",
-    "MENU_SUB_PRICE",
-    "MENU_SUB_CNT",
-    "MENU_SUB_UNITPRICE",
-    "MENU_SUB_ETC",
-    "MENU_ETC",
+    "ITEM_PRICE",
+    "ITEM_QTY",
+    "ITEM_UNIT_PRICE",
+    "ITEM_CODE",
+    "ITEM_SKU",
+    "ITEM_DISCOUNT",
+    "ITEM_OPTION",
+    "ITEM_TAX_FLAG",
+    "ITEM_ETC",
 ]
 
 HARD_NEGATIVE_FIELDS = [
-    "TOTAL_TOTAL_PRICE",
-    "TOTAL_CASHPRICE",
-    "TOTAL_CHANGEPRICE",
-    "TOTAL_CREDITCARDPRICE",
-    "TOTAL_EMONEYPRICE",
-    "SUBTOTAL_SUBTOTAL_PRICE",
-    "SUBTOTAL_TAX_PRICE",
-    "SUBTOTAL_DISCOUNT_PRICE",
-    "SUBTOTAL_SERVICE_PRICE",
+    "STORE_NAME",
+    "STORE_ADDRESS",
+    "STORE_PHONE",
+    "DATE",
+    "TIME",
+    "RECEIPT_ID",
+    "SUBTOTAL_PRICE",
+    "TAX_PRICE",
+    "DISCOUNT_PRICE",
+    "SERVICE_PRICE",
+    "TOTAL_PRICE",
+    "CASH_PRICE",
+    "CHANGE_PRICE",
+    "CARD_PRICE",
+    "TIP_PRICE",
+    "PAYMENT_METHOD",
+    "PAYMENT_CARD",
+    "PAYMENT_AUTH_CODE",
+    "PAYMENT_INFO",
+    "APPROVAL_CODE",
+    "TRANSACTION_ID",
 ]
 
 CONTEXT_FIELD = "CONTEXT_TOKEN"
@@ -47,7 +70,7 @@ def category_to_field(category: str) -> str:
     if normalized == "O":
         return "O"
     normalized = normalized.replace("sub_total.", "subtotal.")
-    return normalized.upper().replace(".", "_")
+    return canonicalize_field(normalized.upper().replace(".", "_"))
 
 
 def label_to_field(label: str) -> str:
@@ -56,23 +79,23 @@ def label_to_field(label: str) -> str:
     value = str(label).strip()
     if value == "O" or not value:
         return "O"
-    if value.startswith("B-") or value.startswith("I-"):
+    if value.startswith(("B-", "I-")):
         value = value[2:]
     if value.startswith("SUB_TOTAL_"):
         value = "SUBTOTAL_" + value[len("SUB_TOTAL_") :]
-    return value
+    return canonicalize_field(value)
 
 
 def is_head_field(field: str) -> bool:
-    return field in HEAD_FIELDS
+    return is_item_head_field(field)
 
 
 def is_dependent_field(field: str) -> bool:
-    return field in DEP_FIELDS
+    return is_item_dependent_field(field)
 
 
 def is_hard_negative_field(field: str) -> bool:
-    return field in HARD_NEGATIVE_FIELDS
+    return is_hard_negative_for_item_grouping(field)
 
 
 def is_candidate_dep_field(field: str) -> bool:
@@ -80,21 +103,8 @@ def is_candidate_dep_field(field: str) -> bool:
 
 
 def app_field_name(field: str) -> str:
-    mapping = {
-        "MENU_NM": "menu_name",
-        "MENU_PRICE": "price",
-        "MENU_CNT": "count",
-        "MENU_UNITPRICE": "unit_price",
-        "MENU_DISCOUNTPRICE": "discount_price",
-        "MENU_ITEMSUBTOTAL": "item_subtotal",
-        "MENU_SUB_NM": "sub_names",
-        "MENU_SUB_PRICE": "sub_prices",
-        "MENU_SUB_CNT": "sub_counts",
-        "MENU_SUB_UNITPRICE": "sub_unit_prices",
-        "MENU_SUB_ETC": "sub_etc",
-        "MENU_ETC": "etc",
-        "TOTAL_TOTAL_PRICE": "total.total_price",
-        "SUBTOTAL_SUBTOTAL_PRICE": "subtotal.subtotal_price",
-    }
-    return mapping.get(field, str(field).lower())
+    return canonical_output_key(field)
 
+
+def canonical_pair_field(field: str) -> str:
+    return canonicalize_field(field)

@@ -1,0 +1,16 @@
+{
+  "schema_version": "receipt_prediction_v2_mock",
+  "image_width": 1080,
+  "image_height": 1920,
+  "predictions": [
+    {"word_idx": 0, "text": "WINNERS", "box": [100, 100, 500, 180], "label": "B-STORE_NAME", "confidence": 0.99},
+    {"word_idx": 1, "text": "SKINCARE", "box": [100, 400, 300, 450], "label": "B-ITEM_NAME", "confidence": 0.95},
+    {"word_idx": 2, "text": "&", "box": [310, 400, 330, 450], "label": "I-ITEM_NAME", "confidence": 0.95},
+    {"word_idx": 3, "text": "MAK", "box": [340, 400, 430, 450], "label": "I-ITEM_NAME", "confidence": 0.95},
+    {"word_idx": 4, "text": "$", "box": [800, 400, 820, 450], "label": "B-ITEM_PRICE", "confidence": 0.96},
+    {"word_idx": 5, "text": "16.99", "box": [825, 400, 930, 450], "label": "I-ITEM_PRICE", "confidence": 0.96},
+    {"word_idx": 6, "text": "Total", "box": [100, 900, 230, 950], "label": "O", "confidence": 0.99},
+    {"word_idx": 7, "text": "$", "box": [800, 900, 820, 950], "label": "B-TOTAL_PRICE", "confidence": 0.96},
+    {"word_idx": 8, "text": "44.77", "box": [825, 900, 930, 950], "label": "I-TOTAL_PRICE", "confidence": 0.96}
+  ]
+}
