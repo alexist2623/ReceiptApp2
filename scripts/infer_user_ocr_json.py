@@ -189,8 +189,16 @@ def extract_ocr_items(ocr_obj):
     if not isinstance(ocr_obj, dict):
         return items
 
-    add_items_from_list(ocr_obj.get("words"), "words", items)
-    add_items_from_list(ocr_obj.get("tokens"), "tokens", items)
+    top_level_words = ocr_obj.get("words")
+    if isinstance(top_level_words, list) and top_level_words:
+        add_items_from_list(top_level_words, "words", items)
+        return items
+
+    top_level_tokens = ocr_obj.get("tokens")
+    if isinstance(top_level_tokens, list) and top_level_tokens:
+        add_items_from_list(top_level_tokens, "tokens", items)
+        return items
+
     extract_from_lines(ocr_obj.get("lines"), "lines", items)
 
     for block_key in ("textBlocks", "blocks"):

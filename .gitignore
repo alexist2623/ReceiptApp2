@@ -15,3 +15,9 @@ wandb/
 user_receipts/
 user_ocr_inputs/
 receipt_samples/
+ReceiptApp/.gradle/
+ReceiptApp/.idea/
+ReceiptApp/**/build/
+ReceiptApp/local.properties
+ReceiptApp/app/src/main/assets/models/
+*.hprof

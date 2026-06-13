@@ -16,7 +16,7 @@ from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, 
 from ml.span_relg.model import SpanRelGModel
 from ml.span_relg.schema import ALL_FIELDS
 from ml.span_relg.span_utils import bio_predictions_to_spans
-from ml.span_relg.visualization import draw_span_relg_overlay
+from ml.span_relg.visualization import draw_span_relg_overlay, draw_user_item_mapping_overlay
 
 
 def parse_args():
@@ -173,6 +173,14 @@ def main():
     schema = rel_schema or {"field2id": {field: idx for idx, field in enumerate(ALL_FIELDS)}, "kind2id": {"SPAN": 0, "TOKEN": 1}}
     field2id = schema.get("field2id") or {field: idx for idx, field in enumerate(schema["field_list"])}
     kind2id = schema.get("kind2id") or {"SPAN": 0, "TOKEN": 1}
+    unsupported_spans = [span for span in sample_info["spans"] if span.get("field") not in field2id]
+    if unsupported_spans:
+        unsupported_counts = Counter(span.get("field", "UNKNOWN") for span in unsupported_spans)
+        print(
+            "warning: dropping predicted spans not present in span rel-g schema: "
+            f"{dict(unsupported_counts)}"
+        )
+        sample_info["spans"] = [span for span in sample_info["spans"] if span.get("field") in field2id]
 
     word_features = compute_word_hidden(
         sample_info["image"],
@@ -222,6 +230,7 @@ def main():
             "threshold": args.threshold,
             "num_words": len(sample_info["words"]),
             "num_spans": len(sample_info["spans"]),
+            "dropped_unsupported_spans": unsupported_spans,
             "num_candidate_edges": len(edges),
             "selected_edges": [edge for edge in edges if edge["selected"]],
             "all_candidate_edges": edges,
@@ -229,7 +238,9 @@ def main():
         },
     )
     selected_edges = [edge for edge in edges if edge["selected"]]
-    draw_span_relg_overlay(sample_info["image"], cache, selected_edges, out_overlay, title=f"{prediction_path.stem} rel-g")
+    edge_overlay = out_overlay.with_name(f"{out_overlay.stem}_edges{out_overlay.suffix}")
+    draw_user_item_mapping_overlay(sample_info["image"], decoded.get("items", []), out_overlay, title=f"{prediction_path.stem} item mapping")
+    draw_span_relg_overlay(sample_info["image"], cache, selected_edges, edge_overlay, title=f"{prediction_path.stem} rel-g edges")
     if args.debug:
         for span in sample_info["spans"][:30]:
             print(f"span {span['span_id']}: {span['field']} {span['text']!r}")
@@ -237,6 +248,7 @@ def main():
             print(f"edge {edge['head_text']!r} -> {edge['dep_text']!r} {edge['dep_field']} p={edge['prob']:.3f}")
     print(f"relg JSON path: {out_json}")
     print(f"relg overlay path: {out_overlay}")
+    print(f"relg edge debug overlay path: {edge_overlay}")
     print("User span rel-g inference passed.")
 
 
