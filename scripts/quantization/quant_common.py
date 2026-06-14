@@ -52,6 +52,15 @@ def file_size_mb(path):
     return path.stat().st_size / (1024 * 1024) if path.exists() else None
 
 
+def onnx_total_size_mb(path):
+    path = Path(path)
+    total = path.stat().st_size if path.exists() else 0
+    external = Path(str(path) + ".data")
+    if external.exists():
+        total += external.stat().st_size
+    return total / (1024 * 1024) if total else None
+
+
 def load_labels(checkpoint):
     checkpoint = Path(checkpoint)
     label_path = checkpoint / "labels.json"
