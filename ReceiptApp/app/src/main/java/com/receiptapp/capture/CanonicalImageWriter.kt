@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Log
 import com.receiptapp.ocr.ImageInfoDto
 import com.receiptapp.receipt.ReceiptFileStore
+import com.receiptapp.util.ImageDimensionValidator
 import com.receiptapp.util.TimeUtils
 import java.io.File
 import java.io.FileOutputStream
@@ -31,6 +32,13 @@ class CanonicalImageWriter(
             ?: error("Could not decode captured image: ${sourceFile.absolutePath}")
         val rotationDegrees = ImageRotationUtils.exifRotationDegrees(sourceFile)
         val canonicalBitmap = ImageRotationUtils.rotateIfNeeded(rawBitmap, rotationDegrees)
+        Log.i(
+            "ReceiptOCR",
+            "Canonical source decoded: file=${sourceFile.absolutePath}, " +
+                "original=${originalWidth ?: "unknown"}x${originalHeight ?: "unknown"}, " +
+                "rotationDegrees=$rotationDegrees, " +
+                "canonicalBitmap=${canonicalBitmap.width}x${canonicalBitmap.height}",
+        )
         return writeBitmap(canonicalBitmap, captureId, rotationDegrees, originalWidth, originalHeight)
     }
 
@@ -55,14 +63,34 @@ class CanonicalImageWriter(
         FileOutputStream(imageFile).use { output ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
         }
-        Log.i("ReceiptOCR", "Saved canonical image: ${imageFile.absolutePath}")
+        val savedSize = ImageDimensionValidator.readImageSize(imageFile)
+        require(bitmap.width == savedSize.width && bitmap.height == savedSize.height) {
+            "Canonical image save mismatch: bitmapAfterRotation=${bitmap.width}x${bitmap.height}, " +
+                "savedJpeg=${savedSize.width}x${savedSize.height}, file=${imageFile.absolutePath}"
+        }
+        ImageDimensionValidator.validateImageInfoMatchesFile(
+            imageFile = imageFile,
+            expectedWidth = savedSize.width,
+            expectedHeight = savedSize.height,
+            context = "Canonical image save",
+        )
+        Log.i(
+            "ReceiptOCR",
+            "Canonical image saved:\n" +
+                "captureId=$captureId\n" +
+                "sourceOriginal=${originalWidth ?: "unknown"}x${originalHeight ?: "unknown"}\n" +
+                "rotationDegrees=$rotationDegreesApplied\n" +
+                "bitmapAfterRotation=${bitmap.width}x${bitmap.height}\n" +
+                "savedJpeg=${savedSize.width}x${savedSize.height}\n" +
+                "file=${imageFile.absolutePath}",
+        )
         return CanonicalImageResult(
             captureId = captureId,
             imageFile = imageFile,
             imageInfo = ImageInfoDto(
                 fileName = imageFile.name,
-                width = bitmap.width,
-                height = bitmap.height,
+                width = savedSize.width,
+                height = savedSize.height,
                 mimeType = "image/jpeg",
                 exifOrientationApplied = true,
                 rotationDegreesApplied = rotationDegreesApplied,

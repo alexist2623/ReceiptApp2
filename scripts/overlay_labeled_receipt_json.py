@@ -1,4 +1,5 @@
 import argparse
+import copy
 import hashlib
 import json
 import sys
@@ -63,12 +64,32 @@ def parse_args():
     parser.add_argument("--font_size", type=int, default=22)
     parser.add_argument("--line_width", type=int, default=4)
     parser.add_argument("--draw_legend", action="store_true", default=True)
+    parser.add_argument(
+        "--coordinate_mode",
+        choices=["strict", "auto-scale", "assume-image"],
+        default="strict",
+        help="Coordinate policy for image size and label JSON size mismatches.",
+    )
+    parser.add_argument(
+        "--write_scaled_label_json",
+        default=None,
+        help="Optional output path for an auto-scaled label JSON copy. Only meaningful with --coordinate_mode auto-scale.",
+    )
     parser.add_argument("--debug", action="store_true")
-    return parser.parse_args()
+
+    # Backward-compatible aliases from the first coordinate diagnostic version.
+    parser.add_argument("--auto_scale_on_mismatch", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--allow_missing_json_size", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.auto_scale_on_mismatch:
+        args.coordinate_mode = "auto-scale"
+    if args.allow_missing_json_size and args.coordinate_mode == "strict":
+        args.coordinate_mode = "assume-image"
+    return args
 
 
 def fail(message):
-    print(f"ERROR: {message}", file=sys.stderr)
+    print(message if message.startswith("ERROR:") else f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(1)
 
 
@@ -86,10 +107,10 @@ def save_json(path, payload):
 
 def capture_id_from_payload(payload, label_json):
     for key in ("capture_id", "captureId", "id"):
-        if payload.get(key):
+        if isinstance(payload, dict) and payload.get(key):
             return str(payload[key])
     stem = Path(label_json).stem
-    for suffix in ("_labeled_v2", "_labeled", "_labels_v2", "_labels"):
+    for suffix in ("_labeled_v2_1", "_labeled_v2", "_labeled", "_labels_v2", "_labels"):
         if stem.lower().endswith(suffix):
             return stem[: -len(suffix)]
     return stem
@@ -161,6 +182,63 @@ def parse_box(box):
     return parsed, None
 
 
+def scale_box(box, scale_x, scale_y):
+    if box is None:
+        return None
+    return [
+        int(round(box[0] * scale_x)),
+        int(round(box[1] * scale_y)),
+        int(round(box[2] * scale_x)),
+        int(round(box[3] * scale_y)),
+    ]
+
+
+def scale_point(point, scale_x, scale_y):
+    if not isinstance(point, list) or len(point) != 2:
+        return point
+    try:
+        return [int(round(float(point[0]) * scale_x)), int(round(float(point[1]) * scale_y))]
+    except (TypeError, ValueError):
+        return point
+
+
+def scale_payload_coordinates(value, scale_x, scale_y):
+    if isinstance(value, list):
+        return [scale_payload_coordinates(item, scale_x, scale_y) for item in value]
+    if not isinstance(value, dict):
+        return value
+    scaled = {}
+    for key, item in value.items():
+        if key == "box" and isinstance(item, list) and len(item) == 4:
+            parsed, _ = parse_box(item)
+            scaled[key] = scale_box(parsed, scale_x, scale_y) if parsed is not None else item
+        elif key == "cornerPoints" and isinstance(item, list):
+            scaled[key] = [scale_point(point, scale_x, scale_y) for point in item]
+        else:
+            scaled[key] = scale_payload_coordinates(item, scale_x, scale_y)
+    return scaled
+
+
+def make_scaled_payload(payload, source_width, source_height, target_width, target_height, scale_x, scale_y):
+    scaled = scale_payload_coordinates(copy.deepcopy(payload), scale_x, scale_y)
+    if isinstance(scaled, dict):
+        scaled["image_width"] = target_width
+        scaled["image_height"] = target_height
+        if isinstance(scaled.get("image"), dict):
+            scaled["image"]["width"] = target_width
+            scaled["image"]["height"] = target_height
+        scaled["coordinate_transform"] = {
+            "source_width": source_width,
+            "source_height": source_height,
+            "target_width": target_width,
+            "target_height": target_height,
+            "scale_x": scale_x,
+            "scale_y": scale_y,
+            "reason": "rescaled to match actual training image",
+        }
+    return scaled
+
+
 def clamp_for_draw(box, width, height):
     if box is None or len(box) != 4:
         return None
@@ -221,7 +299,7 @@ def truncate_text(text, max_len):
     text = str(text or "")
     if len(text) <= max_len:
         return text
-    return text[: max(0, max_len - 1)] + "…"
+    return text[: max(0, max_len - 3)] + "..."
 
 
 def load_labeled_words(payload):
@@ -252,6 +330,80 @@ def load_labeled_words(payload):
             }
         )
     return loaded
+
+
+def read_json_size(payload):
+    json_width = payload.get("image_width") or payload.get("width")
+    json_height = payload.get("image_height") or payload.get("height")
+    nested = payload.get("image")
+    if (json_width is None or json_height is None) and isinstance(nested, dict):
+        json_width = nested.get("width") if json_width is None else json_width
+        json_height = nested.get("height") if json_height is None else json_height
+    if json_width is None or json_height is None:
+        return None, None
+    try:
+        return int(json_width), int(json_height)
+    except (TypeError, ValueError):
+        fail(f"label JSON image size must be integer-like, got {json_width!r}x{json_height!r}.")
+
+
+def resolve_coordinate_transform(args, actual_width, actual_height, payload):
+    json_width, json_height = read_json_size(payload)
+    warnings = []
+    coordinate_match = json_width == actual_width and json_height == actual_height
+    box_transform_applied = False
+    scale_x = 1.0
+    scale_y = 1.0
+
+    if json_width is None or json_height is None:
+        if args.coordinate_mode == "assume-image":
+            warnings.append("label JSON missing image_width/image_height; assuming boxes are actual image pixels.")
+            json_width = actual_width
+            json_height = actual_height
+            coordinate_match = True
+        else:
+            fail(
+                "ERROR: label JSON missing image_width/image_height. "
+                "Use --coordinate_mode assume-image only if boxes are known to be in actual image pixels."
+            )
+
+    if json_width != actual_width or json_height != actual_height:
+        print("COORDINATE MISMATCH DETECTED")
+        print(f"actual image: {actual_width}x{actual_height}")
+        print(f"label json: {json_width}x{json_height}")
+        print(f"mode: {args.coordinate_mode}")
+        if args.coordinate_mode == "strict":
+            fail(
+                f"ERROR: coordinate mismatch: actual image={actual_width}x{actual_height}, "
+                f"label_json={json_width}x{json_height}. "
+                "Use --coordinate_mode auto-scale for visualization only, or fix image/json coordinate space before training."
+            )
+        if args.coordinate_mode == "assume-image":
+            fail(
+                f"ERROR: coordinate mismatch: actual image={actual_width}x{actual_height}, "
+                f"label_json={json_width}x{json_height}. assume-image only accepts missing JSON dimensions."
+            )
+        scale_x = actual_width / json_width
+        scale_y = actual_height / json_height
+        box_transform_applied = True
+        print(f"scale_x={scale_x:.6f} scale_y={scale_y:.6f}")
+        warnings.append(
+            "Overlay was scaled for visualization only. "
+            "Do not use this as proof that training data is coordinate-consistent."
+        )
+
+    return {
+        "coordinate_mode": args.coordinate_mode,
+        "image_actual_width": actual_width,
+        "image_actual_height": actual_height,
+        "label_json_width": json_width,
+        "label_json_height": json_height,
+        "coordinate_match": coordinate_match,
+        "scale_x": scale_x,
+        "scale_y": scale_y,
+        "box_transform_applied": box_transform_applied,
+        "warnings": warnings,
+    }
 
 
 def build_span_preview(words, warnings):
@@ -315,17 +467,27 @@ def main():
     payload = load_json(label_json_path)
     capture_id, out_path, summary_path = default_paths(args, payload)
     words = load_labeled_words(payload)
-    warnings = []
+    coordinate = resolve_coordinate_transform(args, width, height, payload)
+
+    if args.write_scaled_label_json:
+        if args.coordinate_mode != "auto-scale":
+            fail("--write_scaled_label_json is only allowed with --coordinate_mode auto-scale.")
+        scaled_payload = make_scaled_payload(
+            payload,
+            source_width=coordinate["label_json_width"],
+            source_height=coordinate["label_json_height"],
+            target_width=width,
+            target_height=height,
+            scale_x=coordinate["scale_x"],
+            scale_y=coordinate["scale_y"],
+        )
+        save_json(args.write_scaled_label_json, scaled_payload)
+
+    warnings = list(coordinate["warnings"])
     invalid_boxes = []
     label_counts = Counter()
     field_counts = Counter()
     appeared_fields = []
-
-    json_width = payload.get("image_width") or payload.get("width")
-    json_height = payload.get("image_height") or payload.get("height")
-    if json_width is not None and json_height is not None:
-        if int(json_width) != width or int(json_height) != height:
-            warnings.append(f"image size mismatch: JSON={json_width}x{json_height}, actual={width}x{height}")
 
     overlay = image.convert("RGBA")
     draw = ImageDraw.Draw(overlay, "RGBA")
@@ -353,7 +515,12 @@ def main():
         if field == "O" and not args.show_o and not box_error:
             continue
         color = (220, 20, 60) if box_error else field_color(field)
-        box = clamp_for_draw(parsed_box, width, height)
+        draw_box = (
+            scale_box(parsed_box, coordinate["scale_x"], coordinate["scale_y"])
+            if coordinate["box_transform_applied"] and parsed_box is not None
+            else parsed_box
+        )
+        box = clamp_for_draw(draw_box, width, height)
         if box is None:
             box = [10, invalid_marker_y, min(width - 1, 240), min(height - 1, invalid_marker_y + 28)]
             invalid_marker_y += 34
@@ -379,8 +546,18 @@ def main():
         "capture_id": capture_id,
         "image_width": width,
         "image_height": height,
-        "json_image_width": json_width,
-        "json_image_height": json_height,
+        "json_image_width": coordinate["label_json_width"],
+        "json_image_height": coordinate["label_json_height"],
+        "coordinate_mode": coordinate["coordinate_mode"],
+        "image_actual_width": coordinate["image_actual_width"],
+        "image_actual_height": coordinate["image_actual_height"],
+        "label_json_width": coordinate["label_json_width"],
+        "label_json_height": coordinate["label_json_height"],
+        "coordinate_match": coordinate["coordinate_match"],
+        "scale_x": coordinate["scale_x"],
+        "scale_y": coordinate["scale_y"],
+        "box_transform_applied": coordinate["box_transform_applied"],
+        "warning": warnings[0] if warnings else None,
         "num_words": len(words),
         "num_labeled_non_o": sum(count for label, count in label_counts.items() if label != "O"),
         "label_counts": dict(label_counts),
@@ -388,13 +565,17 @@ def main():
         "invalid_boxes": invalid_boxes,
         "warnings": warnings,
         "span_preview": span_preview,
+        "scaled_label_json": str(args.write_scaled_label_json) if args.write_scaled_label_json else None,
     }
     save_json(summary_path, summary)
 
     print(f"image: {image_path}")
     print(f"label_json: {label_json_path}")
+    print(f"coordinate_mode: {args.coordinate_mode}")
     print(f"overlay PNG path: {out_path}")
     print(f"summary JSON path: {summary_path}")
+    if args.write_scaled_label_json:
+        print(f"scaled label JSON path: {args.write_scaled_label_json}")
     print(f"label_counts: {dict(label_counts)}")
     print(f"field_counts: {dict(field_counts)}")
     print(f"invalid_box_count: {len(invalid_boxes)}")

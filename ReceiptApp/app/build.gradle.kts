@@ -1,8 +1,18 @@
+import java.time.Instant
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+fun gitCommitSha(): String {
+    return runCatching {
+        providers.exec {
+            commandLine("git", "rev-parse", "--short=12", "HEAD")
+        }.standardOutput.asText.get().trim()
+    }.getOrElse { "unknown" }.ifBlank { "unknown" }
 }
 
 android {
@@ -17,10 +27,13 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "BUILD_TIME_UTC", "\"${Instant.now()}\"")
+        buildConfigField("String", "GIT_COMMIT_SHA", "\"${gitCommitSha()}\"")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     kotlinOptions {

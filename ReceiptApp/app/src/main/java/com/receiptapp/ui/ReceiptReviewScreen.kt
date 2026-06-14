@@ -19,6 +19,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.receiptapp.BuildConfig
 import com.receiptapp.util.JsonUtils
 
 @Composable
@@ -44,6 +45,12 @@ fun ReceiptReviewScreen(
         }
         return
     }
+    val debugValidation = record.ocrPayload.debug?.coordinateValidation
+    val validationOk = (debugValidation == null || debugValidation == "OK") &&
+        record.ocrPayload.image_width == record.ocrPayload.image.width &&
+        record.ocrPayload.image_height == record.ocrPayload.image.height
+    val actualWidth = record.ocrPayload.debug?.canonicalImageActualWidth ?: record.ocrPayload.image.width
+    val actualHeight = record.ocrPayload.debug?.canonicalImageActualHeight ?: record.ocrPayload.image.height
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -58,8 +65,20 @@ fun ReceiptReviewScreen(
             showText = false,
         )
         Text("capture_id: ${record.captureId}")
-        Text("image: ${record.ocrPayload.image_width} x ${record.ocrPayload.image_height}")
+        Text("actual JPG size: $actualWidth x $actualHeight")
+        Text("OCR JSON top-level size: ${record.ocrPayload.image_width} x ${record.ocrPayload.image_height}")
+        Text("OCR JSON image.width/height: ${record.ocrPayload.image.width} x ${record.ocrPayload.image.height}")
         Text("word count: ${record.ocrPayload.words.size}")
+        Text(
+            if (validationOk) {
+                "validation status: OK"
+            } else {
+                "validation status: MISMATCH - Coordinate mismatch. Do not use this export for training."
+            },
+            color = if (validationOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
+        Text("app version: ${record.ocrPayload.app.versionName} (${record.ocrPayload.app.versionCode})")
+        Text("build: ${if (BuildConfig.DEBUG) "debug" else "release"} ${BuildConfig.GIT_COMMIT_SHA}")
         Text("OCR script: ${record.ocrPayload.ocr.script}")
         Text("coordinate space: ${record.ocrPayload.image.coordinateSpace}")
         Text("JSON: ${record.ocrJsonFile.absolutePath}")

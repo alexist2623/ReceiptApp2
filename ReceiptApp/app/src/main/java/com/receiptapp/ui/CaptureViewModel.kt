@@ -17,6 +17,7 @@ import com.receiptapp.network.ServerConfig
 import com.receiptapp.ocr.MlKitOcrEngine
 import com.receiptapp.ocr.OcrScript
 import com.receiptapp.receipt.ReceiptFileStore
+import com.receiptapp.receipt.ReceiptExportValidator
 import com.receiptapp.receipt.ReceiptRepository
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -115,7 +116,9 @@ class CaptureViewModel(
             }
             _uiState.value = _uiState.value.copy(
                 isBusy = false,
-                statusMessage = "OCR complete: ${record.ocrPayload.words.size} words",
+                statusMessage = "OCR complete: ${record.ocrPayload.words.size} words, " +
+                    "image=${record.ocrPayload.image.width}x${record.ocrPayload.image.height}, " +
+                    "json=${record.ocrPayload.image_width}x${record.ocrPayload.image_height}",
                 record = record,
             )
             Log.i("ReceiptOCR", "Capture folder: ${record.imageFile.parentFile?.absolutePath}")
@@ -131,16 +134,34 @@ class CaptureViewModel(
 
     fun createShareIntent(): Intent? {
         val record = _uiState.value.record ?: return null
-        val zip = zipExportService.export(record)
-        return Intent.createChooser(
-            shareIntentFactory.createShareZipIntent(zip),
-            "Share receipt OCR ZIP",
-        )
+        return runCatching {
+            val zip = zipExportService.export(record)
+            Intent.createChooser(
+                shareIntentFactory.createShareZipIntent(zip),
+                "Share receipt OCR ZIP",
+            )
+        }.getOrElse { throwable ->
+            _uiState.value = _uiState.value.copy(
+                isBusy = false,
+                errorMessage = throwable.message ?: throwable::class.java.simpleName,
+                statusMessage = null,
+            )
+            null
+        }
     }
 
     fun uploadToServer() {
         val record = _uiState.value.record ?: return
         viewModelScope.launch {
+            val validation = ReceiptExportValidator.validateRecordForExport(record)
+            if (!validation.ok) {
+                _uiState.value = _uiState.value.copy(
+                    isBusy = false,
+                    statusMessage = null,
+                    errorMessage = validation.errors.joinToString(separator = "\n"),
+                )
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(isBusy = true, statusMessage = "Uploading...", errorMessage = null)
             val result = serverInferenceEngine.infer(record)
             when (result) {

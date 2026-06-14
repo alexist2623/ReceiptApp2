@@ -16,6 +16,7 @@ data class ReceiptOcrPayload(
     val words: List<OcrWordDto>,
     val image_width: Int,
     val image_height: Int,
+    val debug: OcrDebugInfoDto? = null,
 )
 
 @Serializable
@@ -54,6 +55,19 @@ data class OcrInfoDto(
     val source: String = "on_device_ocr",
     val confidenceAvailable: Boolean,
     val note: String? = null,
+)
+
+@Serializable
+data class OcrDebugInfoDto(
+    val canonicalImageActualWidth: Int,
+    val canonicalImageActualHeight: Int,
+    val ocrInputBitmapWidth: Int,
+    val ocrInputBitmapHeight: Int,
+    val savedImagePathHint: String? = null,
+    val coordinateValidation: String,
+    val appBuildType: String? = null,
+    val gitCommitHint: String? = null,
+    val buildTimeUtc: String? = null,
 )
 
 @Serializable

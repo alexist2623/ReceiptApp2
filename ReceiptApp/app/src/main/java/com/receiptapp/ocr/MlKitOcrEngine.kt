@@ -8,6 +8,8 @@ import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.receiptapp.BuildConfig
+import com.receiptapp.util.ImageDimensionValidator
 import com.receiptapp.util.TimeUtils
 import java.io.File
 import kotlinx.coroutines.tasks.await
@@ -27,6 +29,18 @@ class MlKitOcrEngine(
         }
         val bitmap = BitmapFactory.decodeFile(canonicalImageFile.absolutePath)
             ?: error("Could not decode canonical image for OCR: ${canonicalImageFile.absolutePath}")
+        val imageInfo = imageInfoProvider(captureId, canonicalImageFile)
+        val actualSize = ImageDimensionValidator.readImageSize(canonicalImageFile)
+        ImageDimensionValidator.validateImageInfoMatchesFile(
+            imageFile = canonicalImageFile,
+            expectedWidth = imageInfo.width,
+            expectedHeight = imageInfo.height,
+            context = "ML Kit OCR input",
+        )
+        require(bitmap.width == imageInfo.width && bitmap.height == imageInfo.height) {
+            "ML Kit OCR bitmap mismatch: decoded bitmap is ${bitmap.width}x${bitmap.height} " +
+                "but image metadata is ${imageInfo.width}x${imageInfo.height}"
+        }
         val image = InputImage.fromBitmap(bitmap, 0)
         val result = recognizer.process(image).await()
         return OcrJsonMapper.toPayload(
@@ -34,9 +48,20 @@ class MlKitOcrEngine(
             createdAtUtc = TimeUtils.nowUtcIso(),
             device = deviceInfo(),
             app = appInfo(),
-            image = imageInfoProvider(captureId, canonicalImageFile),
+            image = imageInfo,
             script = script,
             snapshot = result.toSnapshot(),
+            debug = OcrDebugInfoDto(
+                canonicalImageActualWidth = actualSize.width,
+                canonicalImageActualHeight = actualSize.height,
+                ocrInputBitmapWidth = bitmap.width,
+                ocrInputBitmapHeight = bitmap.height,
+                savedImagePathHint = canonicalImageFile.absolutePath,
+                coordinateValidation = "OK",
+                appBuildType = if (BuildConfig.DEBUG) "debug" else "release",
+                gitCommitHint = BuildConfig.GIT_COMMIT_SHA,
+                buildTimeUtc = BuildConfig.BUILD_TIME_UTC,
+            ),
         )
     }
 

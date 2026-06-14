@@ -45,6 +45,9 @@ array is used.
 
 ## Run
 
+Default mode is strict coordinate validation. The actual image size must match
+`image_width` / `image_height` in the labeled JSON.
+
 ```bash
 python scripts/overlay_labeled_receipt_json.py \
   --image path/to/20260613T072738Z_37a06228.jpg \
@@ -55,6 +58,34 @@ python scripts/overlay_labeled_receipt_json.py \
   --draw_legend \
   --debug
 ```
+
+If the label JSON was created in a different coordinate space, strict mode
+fails with an error. For visual diagnosis only, use auto-scale:
+
+```bash
+python scripts/overlay_labeled_receipt_json.py \
+  --image path/to/capture.jpg \
+  --label_json path/to/capture_labeled_v2_1.json \
+  --coordinate_mode auto-scale \
+  --out outputs/labeled_overlay/capture_scaled_overlay.png \
+  --summary_out outputs/labeled_overlay/capture_scaled_summary.json
+```
+
+Auto-scale changes only the overlay drawing coordinates. It is not proof that
+the training pair is coordinate-consistent. To create a separate corrected copy
+for later manual review:
+
+```bash
+python scripts/overlay_labeled_receipt_json.py \
+  --image path/to/capture.jpg \
+  --label_json path/to/capture_labeled_v2_1.json \
+  --coordinate_mode auto-scale \
+  --write_scaled_label_json path/to/capture_labeled_v2_1_scaled.json
+```
+
+If a legacy label JSON has no `image_width` / `image_height`, use
+`--coordinate_mode assume-image` only when you know boxes are already in actual
+image pixels.
 
 ## Outputs
 
@@ -73,3 +104,7 @@ python scripts/overlay_labeled_receipt_json.py \
 
 Raw OCR tokens should remain unmerged. Split prices are validated through BIO
 spans, not by merging OCR words.
+
+Fine-tuning inputs must pass strict coordinate validation. Do not train on an
+auto-scaled overlay unless you intentionally wrote and reviewed a scaled label
+JSON copy.

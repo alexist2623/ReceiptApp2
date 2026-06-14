@@ -43,13 +43,35 @@ Shape A:
 
 ```text
 ZIP_EXTRACT_DIR/
+  <capture_id>.jpg
+  <capture_id>_ocr.json
+  <capture_id>_export_validation.json
+  <capture_id>_server_result.json
+```
+
+This is the current Android ZIP structure.
+
+Shape B:
+
+```text
+ZIP_EXTRACT_DIR/
+  <capture_id>_receipt_ocr/
+    <capture_id>.jpg
+    <capture_id>_ocr.json
+    <capture_id>_server_result.json
+```
+
+Shape C:
+
+```text
+ZIP_EXTRACT_DIR/
   images/
     <capture_id>.jpg
   ocr_json/
     <capture_id>.json
 ```
 
-Shape B:
+Shape D:
 
 ```text
 ZIP_EXTRACT_DIR/
@@ -60,7 +82,7 @@ ZIP_EXTRACT_DIR/
       <capture_id>.json
 ```
 
-Shape C:
+Shape E:
 
 ```text
 ZIP_EXTRACT_DIR/
@@ -87,6 +109,15 @@ python scripts/test_exported_receipt_zip.py \
 ```
 
 ## Schema And OCR Overlay Only
+
+Before model inference or labeling, run the coordinate validator:
+
+```bash
+python scripts/validate_receipt_export_coordinates.py \
+  --input_dir path/to/unzipped_receipt_export \
+  --strict \
+  --out_json outputs/coordinate_validation_summary.json
+```
 
 ```bash
 python scripts/test_exported_receipt_zip.py \

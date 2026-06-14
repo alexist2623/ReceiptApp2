@@ -13,6 +13,7 @@ object OcrJsonMapper {
         image: ImageInfoDto,
         script: OcrScript,
         snapshot: RecognizedTextSnapshot,
+        debug: OcrDebugInfoDto? = null,
     ): ReceiptOcrPayload {
         val blocks = mutableListOf<OcrBlockDto>()
         val lines = mutableListOf<OcrLineDto>()
@@ -91,6 +92,7 @@ object OcrJsonMapper {
             words = words,
             image_width = image.width,
             image_height = image.height,
+            debug = debug,
         )
     }
 
