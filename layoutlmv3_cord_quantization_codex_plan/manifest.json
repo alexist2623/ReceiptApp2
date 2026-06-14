@@ -1,0 +1,26 @@
+{
+  "created_at_utc": "2026-06-14T16:45:49.635072Z",
+  "purpose": "CORD-only LayoutLMv3 ONNX/INT8 quantization Codex instruction bundle",
+  "default_checkpoint": "models/layoutlmv3-cord-full/best",
+  "forbidden": [
+    "user labeled data",
+    "mixed checkpoints",
+    "fine-tuning",
+    "rel-g training",
+    "android integration now"
+  ],
+  "files": [
+    "00_GLOBAL_RULES.md",
+    "01_BASELINE_CORD_ONLY_EVAL.md",
+    "02_EXPORT_LAYOUTLMV3_ONNX_FP32.md",
+    "03_VALIDATE_ONNX_FP32_PARITY.md",
+    "04_DYNAMIC_INT8_QUANTIZATION.md",
+    "05_EVALUATE_INT8_AND_RELG_IMPACT.md",
+    "06_STATIC_INT8_PTQ_OPTIONAL.md",
+    "07_SELECTIVE_QUANTIZATION_FALLBACK.md",
+    "08_ANDROID_DEPLOYMENT_PREP_LATER.md",
+    "09_FUTURE_USER_DATA_INTEGRATION.md",
+    "10_FULL_CODEX_PROMPT.md",
+    "README.md"
+  ]
+}
