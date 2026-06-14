@@ -44,6 +44,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests.all { testTask ->
+            val testTmpDir = layout.buildDirectory.dir("tmp/unit-test-tmp").get().asFile
+            testTmpDir.mkdirs()
+            testTask.systemProperty("java.io.tmpdir", testTmpDir.absolutePath)
+        }
+    }
 }
 
 dependencies {
@@ -67,6 +75,7 @@ dependencies {
 
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
@@ -78,4 +87,5 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.26.0")
 }

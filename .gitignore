@@ -21,4 +21,8 @@ ReceiptApp/.idea/
 ReceiptApp/**/build/
 ReceiptApp/local.properties
 ReceiptApp/app/src/main/assets/models/
+ReceiptApp/app/src/main/assets_dev/
+ReceiptApp/app/src/test/assets_dev/
+fixtures/
+artifacts/
 *.hprof
