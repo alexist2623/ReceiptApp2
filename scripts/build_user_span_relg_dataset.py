@@ -15,7 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from ml.receipt_schema import canonicalize_field
 from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3
-from ml.span_relg.schema import ALL_FIELDS, is_dependent_field, is_head_field
+from ml.span_relg.schema import ALL_FIELDS, DEP_FIELDS, HEAD_FIELDS, is_dependent_field, is_head_field
 from ml.span_relg.span_utils import bio_predictions_to_spans
 from scripts.smoke_finetune_user_labels_v2 import clamp_box, load_json, normalize_box, parse_box
 
@@ -118,16 +118,20 @@ def normalize_indices(value):
 
 
 def relation_items(payload):
-    relations = payload.get("item_relations")
-    if not isinstance(relations, list):
-        relations = []
-    if not relations:
-        all_relations = payload.get("relations")
-        relations = all_relations if isinstance(all_relations, list) else []
-    if not relations:
-        edges = payload.get("rel_g_edges")
-        relations = edges if isinstance(edges, list) else []
-    return relations
+    relations = []
+    for key in ("item_relations", "summary_relations", "payment_relations"):
+        values = payload.get(key)
+        if isinstance(values, list):
+            relations.extend(values)
+    if relations:
+        return relations
+
+    all_relations = payload.get("relations")
+    if isinstance(all_relations, list) and all_relations:
+        return all_relations
+
+    edges = payload.get("rel_g_edges")
+    return edges if isinstance(edges, list) else []
 
 
 def find_span_by_indices(spans, indices):
@@ -385,23 +389,13 @@ def main():
         "field2id": field2id,
         "kind2id": kind2id,
         "hidden_dim": hidden_dim,
-        "candidate_head_fields": ["ITEM_NAME"],
-        "candidate_dep_fields": [
-            "ITEM_PRICE",
-            "ITEM_QTY",
-            "ITEM_UNIT_PRICE",
-            "ITEM_CODE",
-            "ITEM_SKU",
-            "ITEM_DISCOUNT",
-            "ITEM_OPTION",
-            "ITEM_TAX_FLAG",
-            "ITEM_ETC",
-        ],
+        "candidate_head_fields": HEAD_FIELDS,
+        "candidate_dep_fields": DEP_FIELDS,
         "notes": [
             "Built from user hand-labeled receipt JSON files.",
             "Temp directory inputs are excluded.",
             "LayoutLMv3 is used only as a frozen feature extractor for rel-g cache building.",
-            "Pair labels are binary relation labels derived from item_relations/relations/rel_g_edges.",
+            "Pair labels are binary relation labels derived from item_relations/summary_relations/payment_relations/relations/rel_g_edges.",
         ],
     }
     summary["field_counts"] = dict(field_counts)

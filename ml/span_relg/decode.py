@@ -9,6 +9,17 @@ from ml.receipt_schema import (
 )
 
 
+SUMMARY_RELATION_SLOTS = {
+    "SUBTOTAL_NAME": {"SUBTOTAL_PRICE": ("subtotal", "subtotal_price")},
+    "TAX_NAME": {
+        "TAX_PRICE": ("subtotal", "tax_price"),
+        "TAX_RATE": ("subtotal", "tax_rate"),
+    },
+    "TOTAL_NAME": {"TOTAL_PRICE": ("total", "total_price")},
+    "TIP_NAME": {"TIP_PRICE": ("total", "tip_price")},
+}
+
+
 def _span_payload(node):
     return {
         "text": node.get("text"),
@@ -135,6 +146,12 @@ def _item_slot_for_dep(field):
     return None, False
 
 
+def _summary_slot_for_edge(head_field, dep_field):
+    head_field = canonicalize_field(head_field)
+    dep_field = canonicalize_field(dep_field)
+    return SUMMARY_RELATION_SLOTS.get(head_field, {}).get(dep_field)
+
+
 def _select_edges(pair_probs, pairs, pair_meta, threshold, collision_strategy):
     selected = []
     for idx, prob in enumerate(pair_probs):
@@ -185,6 +202,7 @@ def decode_edges_to_items(sample, pair_probs, threshold=0.5, collision_strategy=
 
     items = []
     ungrouped_spans = []
+    summary_relations = []
     for node in nodes:
         if node.get("node_kind") != "SPAN":
             continue
@@ -234,6 +252,32 @@ def decode_edges_to_items(sample, pair_probs, threshold=0.5, collision_strategy=
         items.append(item)
 
     summary = collect_document_summary_from_nodes(nodes)
+    for edge in sorted(selected, key=lambda item: item["prob"], reverse=True):
+        head_node = nodes[edge["head_node_id"]]
+        dep_node = nodes[edge["dep_node_id"]]
+        head_field = canonicalize_field(head_node.get("field"))
+        dep_field = canonicalize_field(dep_node.get("field"))
+        summary_slot = _summary_slot_for_edge(head_field, dep_field)
+        if summary_slot is None:
+            continue
+        section_name, slot_name = summary_slot
+        dep_payload = _span_payload(dep_node)
+        dep_payload["rel_prob"] = edge["prob"]
+        if edge.get("link_margin") is not None:
+            dep_payload["link_margin"] = edge["link_margin"]
+        _put_once_or_list(summary[section_name], slot_name, dep_payload)
+        summary_relations.append(
+            {
+                "head_span_id": head_node.get("span_id"),
+                "dep_span_id": dep_node.get("span_id"),
+                "head_text": head_node.get("text"),
+                "dep_text": dep_node.get("text"),
+                "head_field": head_field,
+                "dep_field": dep_field,
+                "prob": edge["prob"],
+                "link_margin": edge.get("link_margin"),
+            }
+        )
     return {
         "schema_version": "receipt_grouped_v2",
         "items": items,
@@ -243,6 +287,7 @@ def decode_edges_to_items(sample, pair_probs, threshold=0.5, collision_strategy=
         "payment": summary["payment"],
         "document": summary["document"],
         "ungrouped_spans": ungrouped_spans,
+        "summary_relations": summary_relations,
         "rel_g_edges": selected,
         "warnings": [],
     }

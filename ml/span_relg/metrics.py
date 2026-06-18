@@ -2,6 +2,7 @@ import re
 from collections import Counter
 
 from ml.receipt_schema import canonicalize_field, is_hard_negative_for_item_grouping
+from ml.span_relg.schema import DEP_FIELDS, SUMMARY_DEP_FIELDS
 
 
 def prf(tp, fp, fn):
@@ -23,7 +24,9 @@ def binary_edge_metrics(labels, probs, threshold=0.5):
     return out
 
 
-def field_edge_metrics(samples, probs_by_sample, threshold=0.5, fields=("ITEM_PRICE", "ITEM_QTY", "ITEM_UNIT_PRICE")):
+def field_edge_metrics(samples, probs_by_sample, threshold=0.5, fields=None):
+    if fields is None:
+        fields = DEP_FIELDS
     totals = {field: {"tp": 0, "fp": 0, "fn": 0} for field in fields}
     for sample, probs in zip(samples, probs_by_sample):
         for label, prob, field in zip(sample["pair_labels"].tolist(), probs, sample["pair_fields"]):
@@ -70,6 +73,28 @@ def item_price_pair_metrics(samples, probs_by_sample, threshold=0.5):
     return prf(tp, fp, fn)
 
 
+def fields_pair_metrics(samples, probs_by_sample, fields, threshold=0.5):
+    fields = {canonicalize_field(field) for field in fields}
+    tp = fp = fn = 0
+    for sample, probs in zip(samples, probs_by_sample):
+        for idx, meta in enumerate(sample.get("pair_meta", [])):
+            if canonicalize_field(meta.get("dep_field")) not in fields:
+                continue
+            pred = float(probs[idx]) >= threshold
+            gold = int(sample["pair_labels"][idx].item()) == 1
+            if gold and pred:
+                tp += 1
+            elif not gold and pred:
+                fp += 1
+            elif gold and not pred:
+                fn += 1
+    return prf(tp, fp, fn)
+
+
+def summary_amount_pair_metrics(samples, probs_by_sample, threshold=0.5):
+    return fields_pair_metrics(samples, probs_by_sample, SUMMARY_DEP_FIELDS, threshold)
+
+
 def normalized_text(value):
     return re.sub(r"\s+", " ", str(value).strip().lower())
 
@@ -82,7 +107,8 @@ def hard_negative_false_positives(samples, probs_by_sample, threshold=0.5):
     for sample, probs in zip(samples, probs_by_sample):
         for idx, meta in enumerate(sample.get("pair_meta", [])):
             field = canonicalize_field(meta.get("dep_field", ""))
-            if is_hard_negative_for_item_grouping(field) and float(probs[idx]) >= threshold:
+            gold = int(sample["pair_labels"][idx].item()) == 1
+            if (not gold) and is_hard_negative_for_item_grouping(field) and float(probs[idx]) >= threshold:
                 count += 1
                 if field.startswith("STORE_"):
                     store_count += 1
@@ -112,11 +138,13 @@ def aggregate_metrics(samples, probs_by_sample, threshold=0.5):
         probs.extend(sample_probs)
     hard_fp, store_fp, total_subtotal_fp, hard_examples = hard_negative_false_positives(samples, probs_by_sample, threshold)
     item_price = item_price_pair_metrics(samples, probs_by_sample, threshold)
+    summary_amount = summary_amount_pair_metrics(samples, probs_by_sample, threshold)
     return {
         "edge": binary_edge_metrics(labels, probs, threshold),
         "field_edges": field_edge_metrics(samples, probs_by_sample, threshold),
         "item_price_pair": item_price,
         "menu_price_pair": item_price,
+        "summary_amount_pair": summary_amount,
         "hard_negative_false_positive_count": hard_fp,
         "store_false_positive_count": store_fp,
         "total_subtotal_false_positive_count": total_subtotal_fp,

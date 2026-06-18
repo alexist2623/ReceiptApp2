@@ -49,6 +49,11 @@ def parse_args():
     parser.add_argument("--font_size", type=int, default=20)
     parser.add_argument("--line_width", type=int, default=4)
     parser.add_argument("--max_text_len", type=int, default=34)
+    parser.add_argument(
+        "--show_relation_labels",
+        action="store_true",
+        help="Draw relation text such as ITEM_NAME -> ITEM_PRICE. Hidden by default to keep the graph readable.",
+    )
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
@@ -431,6 +436,7 @@ def overlay_relations(
     font_size=20,
     line_width=4,
     max_text_len=34,
+    show_relation_labels=False,
     debug=False,
 ):
     image_path = Path(image_path)
@@ -487,9 +493,10 @@ def overlay_relations(
         start = center(head_box)
         end = center(tail_box)
         draw_arrow(draw, start, end, color, width=line_width)
-        label = f"{relation['head_field']} -> {relation['tail_field']}"
-        midpoint = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
-        draw_text_label(draw, midpoint, label, color, font, image_width, image_height)
+        if show_relation_labels:
+            label = f"{relation['head_field']} -> {relation['tail_field']}"
+            midpoint = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
+            draw_text_label(draw, midpoint, label, color, font, image_width, image_height)
         if debug:
             draw_text_label(
                 draw,
@@ -538,6 +545,7 @@ def overlay_relations(
         "label_json_width": coord["label_width"],
         "label_json_height": coord["label_height"],
         "coordinate_mode": coordinate_mode,
+        "show_relation_labels": show_relation_labels,
         "scale_x": coord["scale_x"],
         "scale_y": coord["scale_y"],
         "box_transform_applied": coord["box_transform_applied"],
@@ -579,6 +587,7 @@ def main():
         font_size=args.font_size,
         line_width=args.line_width,
         max_text_len=args.max_text_len,
+        show_relation_labels=args.show_relation_labels,
         debug=args.debug,
     )
 

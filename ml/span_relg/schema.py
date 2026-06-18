@@ -1,19 +1,23 @@
 """Span-level rel-g schema backed by the canonical receipt schema."""
 
 from ml.receipt_schema import (
-    PAYMENT_FIELDS,
-    SUMMARY_FIELDS,
     canonical_output_key,
     canonicalize_field,
     field_for_vocab,
-    is_hard_negative_for_item_grouping,
-    is_item_dependent_field,
-    is_item_head_field,
 )
 
-HEAD_FIELDS = ["ITEM_NAME"]
+ITEM_HEAD_FIELDS = ["ITEM_NAME"]
 
-DEP_FIELDS = [
+SUMMARY_HEAD_FIELDS = [
+    "SUBTOTAL_NAME",
+    "TAX_NAME",
+    "TOTAL_NAME",
+    "TIP_NAME",
+]
+
+HEAD_FIELDS = ITEM_HEAD_FIELDS + SUMMARY_HEAD_FIELDS
+
+ITEM_DEP_FIELDS = [
     "ITEM_PRICE",
     "ITEM_QTY",
     "ITEM_UNIT_PRICE",
@@ -24,6 +28,16 @@ DEP_FIELDS = [
     "ITEM_TAX_FLAG",
     "ITEM_ETC",
 ]
+
+SUMMARY_DEP_FIELDS = [
+    "SUBTOTAL_PRICE",
+    "TAX_PRICE",
+    "TAX_RATE",
+    "TOTAL_PRICE",
+    "TIP_PRICE",
+]
+
+DEP_FIELDS = ITEM_DEP_FIELDS + SUMMARY_DEP_FIELDS
 
 HARD_NEGATIVE_FIELDS = [
     "STORE_NAME",
@@ -61,7 +75,22 @@ HARD_NEGATIVE_FIELDS = [
 
 CONTEXT_FIELD = "CONTEXT_TOKEN"
 
-ALL_FIELDS = ["O", CONTEXT_FIELD] + HEAD_FIELDS + DEP_FIELDS + HARD_NEGATIVE_FIELDS
+
+def _unique(values):
+    seen = set()
+    out = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+# Preserve the original field-id order as much as possible: item fields first,
+# then document/summary/payment hard negatives. Head/dependent behavior is
+# controlled by the sets above, not by the field-list position.
+ALL_FIELDS = _unique(["O", CONTEXT_FIELD] + ITEM_HEAD_FIELDS + ITEM_DEP_FIELDS + HARD_NEGATIVE_FIELDS)
 
 
 def normalize_category(category: str) -> str:
@@ -97,15 +126,15 @@ def label_to_field(label: str) -> str:
 
 
 def is_head_field(field: str) -> bool:
-    return is_item_head_field(field)
+    return canonicalize_field(field) in set(HEAD_FIELDS)
 
 
 def is_dependent_field(field: str) -> bool:
-    return is_item_dependent_field(field)
+    return canonicalize_field(field) in set(DEP_FIELDS)
 
 
 def is_hard_negative_field(field: str) -> bool:
-    return is_hard_negative_for_item_grouping(field)
+    return canonicalize_field(field) in set(HARD_NEGATIVE_FIELDS)
 
 
 def is_candidate_dep_field(field: str) -> bool:

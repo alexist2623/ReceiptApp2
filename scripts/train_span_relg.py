@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument(
         "--best_metric",
         default="menu_price_pair_f1",
-        choices=("item_price_pair_f1", "menu_price_pair_f1", "edge_f1", "eval_loss"),
+        choices=("item_price_pair_f1", "menu_price_pair_f1", "summary_amount_pair_f1", "edge_f1", "eval_loss"),
         help="Metric used to save best/. eval_loss is minimized; F1 metrics are maximized.",
     )
     parser.add_argument(
@@ -250,6 +250,8 @@ def plot_training_history(path, history, best_epoch=None, best_metric="menu_pric
     train_loss = [row.get("train_loss") for row in history]
     eval_loss = [row.get("eval_loss") for row in history]
     f1 = [row.get("menu_price_pair_f1") for row in history]
+    summary_f1 = [row.get("summary_amount_pair_f1") for row in history]
+    edge_f1 = [row.get("edge_f1") for row in history]
 
     fig, loss_ax = plt.subplots(figsize=(11, 6))
     loss_ax.plot(epochs, train_loss, label="train loss", color="#2f6fed", linewidth=2)
@@ -260,6 +262,10 @@ def plot_training_history(path, history, best_epoch=None, best_metric="menu_pric
 
     f1_ax = loss_ax.twinx()
     f1_ax.plot(epochs, f1, label="validation MENU_PRICE pair F1", color="#24945a", linewidth=2)
+    if any(value is not None for value in summary_f1):
+        f1_ax.plot(epochs, summary_f1, label="validation summary amount F1", color="#8d4ed1", linewidth=2)
+    if any(value is not None for value in edge_f1):
+        f1_ax.plot(epochs, edge_f1, label="validation edge F1", color="#555555", linewidth=1.5, alpha=0.75)
     f1_ax.set_ylabel("F1")
     f1_ax.set_ylim(0.0, 1.05)
 
@@ -417,12 +423,15 @@ def main():
         edge_f1 = eval_metrics.get("edge", {}).get("f1", 0.0)
         item_price_metric = eval_metrics.get("item_price_pair", eval_metrics.get("menu_price_pair", {}))
         menu_price_metric = eval_metrics.get("menu_price_pair", item_price_metric)
+        summary_amount_metric = eval_metrics.get("summary_amount_pair", {})
         item_price_f1 = item_price_metric.get("f1", 0.0)
         menu_price_f1 = menu_price_metric.get("f1", item_price_f1)
+        summary_amount_f1 = summary_amount_metric.get("f1", 0.0)
         metric_values = {
             "edge_f1": edge_f1,
             "item_price_pair_f1": item_price_f1,
             "menu_price_pair_f1": menu_price_f1,
+            "summary_amount_pair_f1": summary_amount_f1,
             "eval_loss": eval_metrics.get("eval_loss"),
         }
         score = metric_values[args.best_metric]
@@ -442,6 +451,9 @@ def main():
             "menu_price_pair_f1": menu_price_f1,
             "menu_price_pair_precision": menu_price_metric.get("precision", 0.0),
             "menu_price_pair_recall": menu_price_metric.get("recall", 0.0),
+            "summary_amount_pair_f1": summary_amount_f1,
+            "summary_amount_pair_precision": summary_amount_metric.get("precision", 0.0),
+            "summary_amount_pair_recall": summary_amount_metric.get("recall", 0.0),
             "best_metric": args.best_metric,
             "best_metric_value": score,
             "best_so_far": best_so_far,
@@ -453,6 +465,7 @@ def main():
             f"val_loss={eval_metrics.get('eval_loss'):.6f} | "
             f"edge_f1={edge_f1:.4f} | "
             f"menu_price_pair_f1={menu_price_f1:.4f} | "
+            f"summary_amount_pair_f1={summary_amount_f1:.4f} | "
             f"best_epoch={best_epoch}"
         )
 

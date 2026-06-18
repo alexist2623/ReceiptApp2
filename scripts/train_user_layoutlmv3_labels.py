@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import re
 import shutil
 import sys
 from collections import Counter
@@ -21,7 +22,7 @@ from scripts.smoke_finetune_user_labels_v2 import load_label_schema, load_labele
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune LayoutLMv3 on user labeled receipt JSON files.")
-    parser.add_argument("--input_dir", required=True, help="Directory containing *_receipt_ocr folders.")
+    parser.add_argument("--input_dir", required=True, nargs="+", help="One or more directories containing *_receipt_ocr folders.")
     parser.add_argument("--exclude_dir_name", default="Temp")
     parser.add_argument("--label_schema", default="schemas/receipt_labels_v2.json")
     parser.add_argument("--model_name_or_path", default="models/layoutlmv3-cord-full/best")
@@ -36,6 +37,11 @@ def parse_args():
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--validation_ratio", type=float, default=0.2)
     parser.add_argument("--validation_count", type=int, default=None)
+    parser.add_argument("--split_by_parent", action="store_true", help="Split by parent capture id to avoid original/augmented leakage.")
+    parser.add_argument("--validation_parent_count", type=int, default=None)
+    parser.add_argument("--validation_augmented", action="store_true", help="Include augmented records in validation. Default keeps validation on originals only.")
+    parser.add_argument("--max_train_samples", type=int, default=None)
+    parser.add_argument("--max_eval_samples", type=int, default=None)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
@@ -67,12 +73,40 @@ def select_device(device):
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def collect_label_pairs(input_dir, exclude_dir_name):
-    input_dir = Path(input_dir)
-    if not input_dir.exists():
-        fail(f"input_dir not found: {input_dir}")
-    all_labels = sorted(input_dir.rglob("*_labeled_v2_1.json"))
-    excluded = [path for path in all_labels if exclude_dir_name and exclude_dir_name in path.parts]
+def path_is_excluded(path, exclude_dir_name):
+    if not exclude_dir_name:
+        return False
+    needle = exclude_dir_name.lower()
+    return any(needle in part.lower() for part in Path(path).parts)
+
+
+def read_parent_capture_id(label_path, capture_id):
+    try:
+        with Path(label_path).open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        payload = {}
+    augmentation = payload.get("augmentation") if isinstance(payload, dict) else None
+    if isinstance(augmentation, dict) and augmentation.get("parent_capture_id"):
+        return str(augmentation["parent_capture_id"]), True
+    for key in ("parent_capture_id", "parentCaptureId"):
+        if isinstance(payload, dict) and payload.get(key):
+            return str(payload[key]), True
+    match = re.match(r"(.+?)_aug_\d{3}_[0-9a-fA-F]+$", capture_id)
+    if match:
+        return match.group(1), True
+    return capture_id, False
+
+
+def collect_label_pairs(input_dirs, exclude_dir_name):
+    input_dirs = [Path(path) for path in input_dirs]
+    for input_dir in input_dirs:
+        if not input_dir.exists():
+            fail(f"input_dir not found: {input_dir}")
+    all_labels = []
+    for input_dir in input_dirs:
+        all_labels.extend(sorted(input_dir.rglob("*_labeled_v2_1.json")))
+    excluded = [path for path in all_labels if path_is_excluded(path, exclude_dir_name)]
     labels = [path for path in all_labels if path not in excluded]
     pairs = []
     missing_images = []
@@ -82,7 +116,17 @@ def collect_label_pairs(input_dir, exclude_dir_name):
         if not image_path.exists():
             missing_images.append(str(image_path))
             continue
-        pairs.append({"id": capture_id, "image": str(image_path), "label_json": str(label_path)})
+        parent_id, is_augmented = read_parent_capture_id(label_path, capture_id)
+        pairs.append(
+            {
+                "id": capture_id,
+                "parent_id": parent_id,
+                "is_augmented": is_augmented,
+                "image": str(image_path),
+                "label_json": str(label_path),
+                "source_dir": str(next((root for root in input_dirs if root in label_path.parents), label_path.parent)),
+            }
+        )
     if missing_images:
         fail(f"Missing images for labeled JSON files: {missing_images[:10]}")
     if len(pairs) < 2:
@@ -90,12 +134,45 @@ def collect_label_pairs(input_dir, exclude_dir_name):
     return pairs, excluded
 
 
-def split_pairs(pairs, validation_ratio, validation_count):
+def split_pairs(
+    pairs,
+    validation_ratio,
+    validation_count,
+    split_by_parent=False,
+    validation_parent_count=None,
+    validation_augmented=False,
+):
     pairs = list(sorted(pairs, key=lambda item: item["id"]))
+    if split_by_parent:
+        parent_ids = sorted({item.get("parent_id") or item["id"] for item in pairs})
+        if len(parent_ids) < 2:
+            fail("Need at least two parent capture ids for parent-aware split.")
+        if validation_parent_count is None:
+            validation_parent_count = validation_count
+        if validation_parent_count is None:
+            validation_parent_count = max(1, int(round(len(parent_ids) * validation_ratio)))
+        validation_parent_count = max(1, min(int(validation_parent_count), len(parent_ids) - 1))
+        validation_parents = set(parent_ids[-validation_parent_count:])
+        train_records = [item for item in pairs if (item.get("parent_id") or item["id"]) not in validation_parents]
+        validation_records = [
+            item
+            for item in pairs
+            if (item.get("parent_id") or item["id"]) in validation_parents
+            and (validation_augmented or not item.get("is_augmented"))
+        ]
+        if not validation_records:
+            validation_records = [item for item in pairs if (item.get("parent_id") or item["id"]) in validation_parents]
+        return train_records, validation_records
     if validation_count is None:
         validation_count = max(1, int(round(len(pairs) * validation_ratio)))
     validation_count = max(1, min(int(validation_count), len(pairs) - 1))
     return pairs[:-validation_count], pairs[-validation_count:]
+
+
+def limit_samples(records, max_samples):
+    if max_samples is None:
+        return records
+    return list(records)[: max(0, int(max_samples))]
 
 
 class UserReceiptLabelDataset(Dataset):
@@ -250,10 +327,21 @@ def main():
 
     labels_payload, label_list, label2id, id2label = load_label_schema(args.label_schema)
     records, excluded = collect_label_pairs(args.input_dir, args.exclude_dir_name)
-    train_records, validation_records = split_pairs(records, args.validation_ratio, args.validation_count)
+    train_records, validation_records = split_pairs(
+        records,
+        args.validation_ratio,
+        args.validation_count,
+        split_by_parent=args.split_by_parent,
+        validation_parent_count=args.validation_parent_count,
+        validation_augmented=args.validation_augmented,
+    )
+    train_records = limit_samples(train_records, args.max_train_samples)
+    validation_records = limit_samples(validation_records, args.max_eval_samples)
     print(f"input_dir: {args.input_dir}")
     print(f"all non-Temp records: {len(records)}")
     print(f"excluded Temp labels: {len(excluded)}")
+    print(f"parent ids: {len({record.get('parent_id') or record['id'] for record in records})}")
+    print(f"augmented records: {sum(1 for record in records if record.get('is_augmented'))}")
     print(f"train samples: {len(train_records)}")
     print(f"validation samples: {len(validation_records)}")
     print(f"python: {sys.executable}")
@@ -364,6 +452,11 @@ def main():
         "input_dir": args.input_dir,
         "exclude_dir_name": args.exclude_dir_name,
         "excluded_temp_count": len(excluded),
+        "split_by_parent": args.split_by_parent,
+        "validation_parent_count": args.validation_parent_count,
+        "validation_augmented": args.validation_augmented,
+        "max_train_samples": args.max_train_samples,
+        "max_eval_samples": args.max_eval_samples,
         "model_name_or_path": args.model_name_or_path,
         "output_dir": str(output_dir),
         "epochs": args.epochs,

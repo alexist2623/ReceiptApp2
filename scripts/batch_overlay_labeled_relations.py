@@ -22,6 +22,11 @@ def parse_args():
     parser.add_argument("--coordinate_mode", choices=["strict", "auto-scale"], default="strict")
     parser.add_argument("--font_size", type=int, default=20)
     parser.add_argument("--line_width", type=int, default=4)
+    parser.add_argument(
+        "--show_relation_labels",
+        action="store_true",
+        help="Draw relation text such as ITEM_NAME -> ITEM_PRICE. Hidden by default.",
+    )
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
@@ -71,6 +76,7 @@ def main():
                 coordinate_mode=args.coordinate_mode,
                 font_size=args.font_size,
                 line_width=args.line_width,
+                show_relation_labels=args.show_relation_labels,
                 debug=args.debug,
             )
             results.append(

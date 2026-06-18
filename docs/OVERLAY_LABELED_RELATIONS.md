@@ -60,6 +60,12 @@ For visual diagnosis only:
 Auto-scale draws boxes after scaling from the JSON coordinate space to the
 actual image size. Do not treat auto-scale as training validation.
 
+## Relation Text
+
+Relation text such as `ITEM_NAME -> ITEM_PRICE` is hidden by default so dense
+rel-g overlays stay readable. Colors distinguish relation and field types. Add
+`--show_relation_labels` only when you need the text labels for debugging.
+
 ## Batch
 
 ```bash
