@@ -18,6 +18,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from ml.layoutlmv3_training import encode_layoutlmv3_with_ignore, is_ignore_label, labels_to_ids_with_ignore
 from ml.receipt_schema import canonicalize_label
 from scripts.smoke_finetune_user_labels_v2 import (
     clamp_box,
@@ -136,6 +137,9 @@ def canonicalize_label_list(labels, label2id):
     out = []
     unknown = []
     for label in labels:
+        if is_ignore_label(label):
+            out.append("IGNORE")
+            continue
         canonical = canonicalize_label(label)
         if canonical not in label2id:
             unknown.append({"label": label, "canonical_label": canonical})
@@ -193,6 +197,7 @@ class MixedReceiptDataset(Dataset):
             keep_labels.append(label)
         if not keep_words:
             fail(f"CORD record has no valid words: {record.get('id')}")
+        label_ids, ignored_word_indices = labels_to_ids_with_ignore(keep_labels, self.label2id)
         return {
             "id": record["id"],
             "source": "cord",
@@ -203,7 +208,8 @@ class MixedReceiptDataset(Dataset):
             "boxes": keep_boxes,
             "normalized_boxes": keep_normalized,
             "labels": keep_labels,
-            "label_ids": [self.label2id[label] for label in keep_labels],
+            "label_ids": label_ids,
+            "ignore_word_indices": ignored_word_indices,
             "warnings": [],
             "skipped": [],
         }
@@ -211,18 +217,7 @@ class MixedReceiptDataset(Dataset):
 
 def collate_fn(processor, max_length):
     def collate(samples):
-        encoding = processor(
-            [sample["image"] for sample in samples],
-            [sample["words"] for sample in samples],
-            boxes=[sample["normalized_boxes"] for sample in samples],
-            word_labels=[sample["label_ids"] for sample in samples],
-            padding="max_length",
-            truncation=True,
-            max_length=max_length,
-            return_tensors="pt",
-        )
-        if "labels" not in encoding or encoding["labels"].shape != encoding["input_ids"].shape:
-            fail("Processor did not produce labels shaped like input_ids.")
+        encoding = encode_layoutlmv3_with_ignore(processor, samples, max_length)
         encoding["record_ids"] = [sample["id"] for sample in samples]
         encoding["sources"] = [sample["source"] for sample in samples]
         return encoding

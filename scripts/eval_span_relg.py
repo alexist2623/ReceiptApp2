@@ -366,6 +366,47 @@ def threshold_sweep(samples, probs_by_sample):
     return {"thresholds": rows, "best_threshold": best}
 
 
+def _load_sample_from_record(record):
+    if "sample" in record:
+        return record["sample"]
+    return torch.load(record["path"], map_location="cpu", weights_only=False)
+
+
+def validate_cache_model_compatibility(records, config):
+    num_fields = int(config.get("num_fields", 0))
+    num_kinds = int(config.get("num_kinds", 0))
+    hidden_dim = int(config.get("hidden_dim", 0))
+    max_field_id = -1
+    max_kind_id = -1
+    hidden_dims = set()
+    examples = []
+    for record in records:
+        sample = _load_sample_from_record(record)
+        if sample["node_field_ids"].numel():
+            sample_max_field = int(sample["node_field_ids"].max().item())
+            max_field_id = max(max_field_id, sample_max_field)
+        if sample["node_kind_ids"].numel():
+            sample_max_kind = int(sample["node_kind_ids"].max().item())
+            max_kind_id = max(max_kind_id, sample_max_kind)
+        hidden_dims.add(int(sample["node_hidden"].shape[-1]))
+        if len(examples) < 3:
+            examples.append({"data_id": sample.get("data_id"), "max_field_id": max_field_id, "max_kind_id": max_kind_id})
+    issues = []
+    if num_fields and max_field_id >= num_fields:
+        issues.append(f"cache max node_field_id {max_field_id} >= checkpoint num_fields {num_fields}")
+    if num_kinds and max_kind_id >= num_kinds:
+        issues.append(f"cache max node_kind_id {max_kind_id} >= checkpoint num_kinds {num_kinds}")
+    if hidden_dim and hidden_dims and hidden_dims != {hidden_dim}:
+        issues.append(f"cache hidden dims {sorted(hidden_dims)} != checkpoint hidden_dim {hidden_dim}")
+    if issues:
+        fail(
+            "Span rel-g cache/checkpoint mismatch. "
+            + "; ".join(issues)
+            + ". Rebuild cache with the checkpoint field vocab or retrain rel-g on this cache before evaluation. "
+            + f"examples={examples}"
+        )
+
+
 def main():
     args = parse_args()
     dataset_dir = Path(args.dataset_dir)
@@ -380,6 +421,7 @@ def main():
     print(f"resolved config path: {model_config_path}")
     print(f"field vocab source: {field_vocab['source']}::{field_vocab['key']}")
     print(f"cache summary: {json.dumps(summarize_cache_object(cache_info), ensure_ascii=False, indent=2)}")
+    validate_cache_model_compatibility(cache_info["records"], config)
 
     samples, probs_by_sample, eval_loss, total_pairs = run_inference(model, cache_info["records"], args.batch_size, device, args.split)
     metrics = aggregate_metrics(samples, probs_by_sample, args.threshold)

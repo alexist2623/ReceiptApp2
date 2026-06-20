@@ -103,20 +103,58 @@ def hard_negative_false_positives(samples, probs_by_sample, threshold=0.5):
     count = 0
     store_count = 0
     total_subtotal_count = 0
+    tax_count = 0
+    summary_count = 0
+    payment_count = 0
+    by_field = Counter()
+    by_head_dep = Counter()
+    item_to_field = Counter()
+    wrong_price_field_count = 0
     examples = []
     for sample, probs in zip(samples, probs_by_sample):
         for idx, meta in enumerate(sample.get("pair_meta", [])):
             field = canonicalize_field(meta.get("dep_field", ""))
+            head_field = canonicalize_field(meta.get("head_field", ""))
             gold = int(sample["pair_labels"][idx].item()) == 1
             if (not gold) and is_hard_negative_for_item_grouping(field) and float(probs[idx]) >= threshold:
                 count += 1
+                by_field[field] += 1
+                by_head_dep[f"{head_field}->{field}"] += 1
                 if field.startswith("STORE_"):
                     store_count += 1
                 if field.startswith("TOTAL_") or field.startswith("SUBTOTAL_") or field in {"TOTAL_PRICE", "SUBTOTAL_PRICE", "TAX_PRICE"}:
                     total_subtotal_count += 1
+                if field.startswith("TAX_") or field == "TAX_PRICE":
+                    tax_count += 1
+                if field.startswith(("TOTAL_", "SUBTOTAL_", "DISCOUNT_", "SERVICE_", "TIP_")) or field in {
+                    "TOTAL_PRICE",
+                    "SUBTOTAL_PRICE",
+                    "DISCOUNT_PRICE",
+                    "SERVICE_PRICE",
+                    "TIP_PRICE",
+                }:
+                    summary_count += 1
+                if field.startswith(("PAYMENT_", "CARD_", "CASH_", "CHANGE_")):
+                    payment_count += 1
+                if head_field == "ITEM_NAME":
+                    item_to_field[field] += 1
+                    if field in {"TOTAL_PRICE", "SUBTOTAL_PRICE", "TAX_PRICE", "TIP_PRICE", "PAYMENT_INFO"}:
+                        wrong_price_field_count += 1
                 if len(examples) < 50:
                     examples.append({"data_id": sample.get("data_id"), **meta, "dep_field": field, "prob": float(probs[idx])})
-    return count, store_count, total_subtotal_count, examples
+    return {
+        "count": count,
+        "store_count": store_count,
+        "total_subtotal_count": total_subtotal_count,
+        "tax_count": tax_count,
+        "summary_count": summary_count,
+        "payment_count": payment_count,
+        "by_field": dict(by_field.most_common()),
+        "by_head_dep": dict(by_head_dep.most_common()),
+        "item_to_field": dict(item_to_field.most_common()),
+        "wrong_price_field_count": wrong_price_field_count,
+        "examples": examples,
+    }
 
 
 def dependent_collision_count(samples, probs_by_sample, threshold=0.5):
@@ -136,7 +174,7 @@ def aggregate_metrics(samples, probs_by_sample, threshold=0.5):
     for sample, sample_probs in zip(samples, probs_by_sample):
         labels.extend(sample["pair_labels"].tolist())
         probs.extend(sample_probs)
-    hard_fp, store_fp, total_subtotal_fp, hard_examples = hard_negative_false_positives(samples, probs_by_sample, threshold)
+    hard_fp = hard_negative_false_positives(samples, probs_by_sample, threshold)
     item_price = item_price_pair_metrics(samples, probs_by_sample, threshold)
     summary_amount = summary_amount_pair_metrics(samples, probs_by_sample, threshold)
     return {
@@ -145,9 +183,20 @@ def aggregate_metrics(samples, probs_by_sample, threshold=0.5):
         "item_price_pair": item_price,
         "menu_price_pair": item_price,
         "summary_amount_pair": summary_amount,
-        "hard_negative_false_positive_count": hard_fp,
-        "store_false_positive_count": store_fp,
-        "total_subtotal_false_positive_count": total_subtotal_fp,
-        "hard_negative_false_positive_examples": hard_examples,
+        "hard_negative_false_positive_count": hard_fp["count"],
+        "store_false_positive_count": hard_fp["store_count"],
+        "total_subtotal_false_positive_count": hard_fp["total_subtotal_count"],
+        "tax_false_positive_count": hard_fp["tax_count"],
+        "summary_false_positive_count": hard_fp["summary_count"],
+        "payment_false_positive_count": hard_fp["payment_count"],
+        "hard_negative_false_positive_by_field": hard_fp["by_field"],
+        "hard_negative_false_positive_by_head_dep": hard_fp["by_head_dep"],
+        "item_to_total_price_false_positive_count": hard_fp["item_to_field"].get("TOTAL_PRICE", 0),
+        "item_to_subtotal_price_false_positive_count": hard_fp["item_to_field"].get("SUBTOTAL_PRICE", 0),
+        "item_to_tax_price_false_positive_count": hard_fp["item_to_field"].get("TAX_PRICE", 0),
+        "item_to_tip_price_false_positive_count": hard_fp["item_to_field"].get("TIP_PRICE", 0),
+        "item_to_payment_info_false_positive_count": hard_fp["item_to_field"].get("PAYMENT_INFO", 0),
+        "wrong_price_field_count": hard_fp["wrong_price_field_count"],
+        "hard_negative_false_positive_examples": hard_fp["examples"],
         "dependent_collision_count": dependent_collision_count(samples, probs_by_sample, threshold),
     }

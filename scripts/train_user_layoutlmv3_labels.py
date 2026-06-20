@@ -17,6 +17,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from ml.layoutlmv3_training import encode_layoutlmv3_with_ignore
 from scripts.smoke_finetune_user_labels_v2 import load_label_schema, load_labeled_sample
 
 
@@ -194,18 +195,7 @@ class UserReceiptLabelDataset(Dataset):
 
 def collate_fn(processor, max_length):
     def collate(samples):
-        encoding = processor(
-            [sample["image"] for sample in samples],
-            [sample["words"] for sample in samples],
-            boxes=[sample["normalized_boxes"] for sample in samples],
-            word_labels=[sample["label_ids"] for sample in samples],
-            padding="max_length",
-            truncation=True,
-            max_length=max_length,
-            return_tensors="pt",
-        )
-        if "labels" not in encoding or encoding["labels"].shape != encoding["input_ids"].shape:
-            fail("Processor did not produce labels shaped like input_ids.")
+        encoding = encode_layoutlmv3_with_ignore(processor, samples, max_length)
         encoding["record_ids"] = [sample["id"] for sample in samples]
         return encoding
 
