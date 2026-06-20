@@ -27,6 +27,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -38,6 +39,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ReceiptCaptureScreen(
     state: CaptureUiState,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     onCapturedFile: (java.io.File) -> Unit,
     onCaptureError: (String) -> Unit,
     onGalleryUri: (android.net.Uri) -> Unit,
@@ -68,10 +70,11 @@ fun ReceiptCaptureScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(contentPadding)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Receipt OCR", style = MaterialTheme.typography.titleLarge)
+        Text("Receipt Scan", style = MaterialTheme.typography.titleLarge)
         Box(
             modifier = Modifier
                 .fillMaxWidth()

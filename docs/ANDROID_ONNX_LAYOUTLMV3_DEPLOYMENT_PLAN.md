@@ -1,7 +1,8 @@
 # Android ONNX LayoutLMv3 Deployment Plan
 
-This document prepares a later Android integration for the CORD-only quantized
-LayoutLMv3 pipeline. It does not integrate ONNX Runtime into the Android app yet.
+This document tracks Android integration for the quantized LayoutLMv3 pipeline.
+The app now has an on-device path for ML Kit OCR -> LayoutLMv3 INT8 ONNX ->
+span-level rel-g ONNX -> grouped receipt output.
 
 ## Current Model Baseline
 
@@ -31,12 +32,13 @@ The Android MVP must be gated in this order:
 3. **Phase C: OCR to label overlay MVP**
    - Only after Phase A/B pass, connect ML Kit OCR output to LayoutLMv3 logits.
    - Recover word-level labels and draw label overlay.
-4. **Phase D: rel-g integration later**
-   - Do not add rel-g to Android until LayoutLMv3 preprocessing and label overlay are stable.
+4. **Phase D: span-level rel-g ONNX grouping**
+   - Use `last_hidden_state` text-token features, predicted BIO spans, and the exported rel-g ONNX model.
+   - Do not fall back to y/line-distance item-price heuristics.
 
 The current repo includes the Phase A ONNX smoke runner and a Phase B parity
-comparator gate. The real Android tokenizer/image preprocessing implementation
-is intentionally still separate from OCR and not wired into the app flow yet.
+comparator gate. The Android app flow now wires mobile OCR into LayoutLMv3 INT8
+and span-level rel-g ONNX when the ignored model artifacts are present.
 
 ## Python Fixture Generation
 
@@ -124,7 +126,7 @@ The app should provide:
 LayoutLMv3 does not run OCR. The app must pass words and boxes from ML Kit or
 another OCR engine with `apply_ocr=false` semantics.
 
-## Android Components To Implement Later
+## Android Runtime Components
 
 1. Hugging Face-compatible tokenizer.
 2. Word to subword mapping.
@@ -135,7 +137,9 @@ another OCR engine with `apply_ocr=false` semantics.
 7. Logits decode to token labels.
 8. First-subword word-level prediction recovery.
 9. BIO span merge.
-10. Optional `last_hidden_state` extraction for span-level rel-g.
+10. Text-token `last_hidden_state` extraction for rel-g spans/context tokens.
+11. ONNX Runtime session for `span_relg.onnx`.
+12. rel-g edge decoding into item, tax, subtotal, and total output.
 
 ## Python vs Android Parity Test
 
@@ -196,15 +200,12 @@ device/instrumented test should be used as the final Phase A runtime gate.
 ## Suggested Asset Layout
 
 ```text
-ReceiptApp/app/src/main/assets/models/layoutlmv3_cord_int8_dynamic/
+ReceiptApp/app/src/main/assets_dev/layoutlmv3-item-policy-int8/
   model.onnx
+  span_relg.onnx
+  span_relg_schema.json
   labels.json
   tokenizer.json
-  tokenizer_config.json
-  vocab.json
-  merges.txt
-  preprocessor_config.json
-  export_config.json
 ```
 
 `export_config.json` should record:
@@ -220,27 +221,18 @@ ReceiptApp/app/src/main/assets/models/layoutlmv3_cord_int8_dynamic/
 }
 ```
 
-## First Android MVP
+## Android MVP
 
-The first mobile milestone should be:
+The current mobile path is:
 
 1. OCR JSON plus receipt image.
 2. Android preprocessing.
 3. ONNX LayoutLMv3 logits inference.
 4. Word-level label recovery.
-5. Label overlay on the receipt image.
-
-Keep rel-g on PC/server until the LayoutLMv3 Android preprocessing parity passes.
-
-## Next Android Milestone
-
-After the MVP works:
-
-1. Merge BIO labels into spans.
-2. Extract text-token hidden states from `last_hidden_state`.
-3. Pool span hidden features.
-4. Run span-level rel-g.
-5. Produce grouped item JSON.
+5. Merge BIO labels into spans.
+6. Extract text-token hidden states from `last_hidden_state`.
+7. Run span-level rel-g ONNX.
+8. Produce grouped item JSON for the app UI.
 
 ## Risks
 
@@ -250,7 +242,7 @@ After the MVP works:
 - APK size from ONNX model and tokenizer assets.
 - Runtime memory use from `last_hidden_state`.
 - Inference latency on mid-range devices.
-- Extra memory if rel-g is also moved onto mobile.
+- Extra memory from LayoutLMv3 `last_hidden_state` and rel-g nodes.
 
 ## Required Gates Before Android Integration
 
@@ -260,10 +252,9 @@ After the MVP works:
 - Python/Android preprocessing parity passes on at least 10 receipts.
 - OCR boxes visually align with the canonical image used for inference.
 
-## What Was Not Done In This Step
+## Current Runtime Notes
 
-- No user-facing Android inference flow was changed.
-- No OCR-to-model pipeline was connected.
-- No model file was copied into Android assets.
-- No user labeled data was used.
-- No rel-g Android integration was added.
+- Generated model artifacts remain gitignored.
+- Development builds can load artifacts from `app/src/main/assets_dev/layoutlmv3-item-policy-int8/`.
+- Device/runtime deployment can also use `files/models/layoutlmv3-item-policy-int8/`.
+- The Android grouping path must use `span_relg.onnx`; if it is missing, inference fails instead of using a heuristic fallback.

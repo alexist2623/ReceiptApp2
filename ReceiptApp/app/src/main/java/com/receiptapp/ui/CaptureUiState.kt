@@ -11,14 +11,28 @@ data class CaptureUiState(
     val errorMessage: String? = null,
     val record: ReceiptCaptureRecord? = null,
     val serverResponse: ReceiptInferenceResponse? = null,
+    val history: List<ReceiptHistoryEntry> = emptyList(),
+    val periodFilter: PeriodFilter = PeriodFilter.MONTH,
     val serverUrl: String = "",
     val ocrScript: OcrScript = OcrScript.LATIN,
-    val inferenceMode: InferenceMode = InferenceMode.OCR_ONLY,
+    val inferenceMode: InferenceMode = InferenceMode.ON_DEVICE_INT8,
     val showJson: Boolean = false,
 )
 
 enum class AppScreen {
-    CAPTURE,
-    REVIEW,
+    DASHBOARD,
+    SCAN,
+    HISTORY,
     SETTINGS,
 }
+
+enum class PeriodFilter(val label: String) {
+    DAY("Day"),
+    WEEK("Week"),
+    MONTH("Month"),
+}
+
+data class ReceiptHistoryEntry(
+    val record: ReceiptCaptureRecord,
+    val inference: ReceiptInferenceResponse? = null,
+)

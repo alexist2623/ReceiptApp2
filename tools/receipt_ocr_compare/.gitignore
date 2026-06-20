@@ -1,0 +1,23 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.partial
+downloads/*.zip
+
+outputs/*/
+!outputs/.gitkeep
+
+# Model files are kept inside this repository path when downloaded, but are
+# not committed by default to avoid large binary checkpoint churn.
+models/**/*.pt
+models/**/*.pth
+models/**/*.onnx
+models/**/*.pdparams
+models/**/*.pdmodel
+models/**/*.safetensors
+models/**/*.ckpt
+models/**/*.engine
+models/**/*.bin
+
