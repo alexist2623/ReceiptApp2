@@ -22,9 +22,13 @@ data class ReceiptInferenceResponse(
     val schemaVersion: String = "receipt_inference_v1",
     val captureId: String,
     val status: String,
+    val storeName: FieldValueDto? = null,
     val items: List<ReceiptItemDto> = emptyList(),
     val subtotal: Map<String, FieldValueDto>? = null,
+    val tax: Map<String, FieldValueDto>? = null,
+    val taxes: List<ReceiptAmountDto> = emptyList(),
     val total: Map<String, FieldValueDto>? = null,
+    val wordLabels: List<WordLabelDto> = emptyList(),
     val warnings: List<String>? = null,
     val debug: Map<String, JsonElement>? = null,
 )
@@ -42,9 +46,32 @@ data class ReceiptItemDto(
 )
 
 @Serializable
+data class ReceiptAmountDto(
+    val amountIndex: Int,
+    val type: String,
+    val name: FieldValueDto? = null,
+    val price: FieldValueDto? = null,
+    val rate: FieldValueDto? = null,
+    val relGProb: Float? = null,
+    val linkMargin: Float? = null,
+    val linkStatus: String? = null,
+)
+
+@Serializable
 data class FieldValueDto(
     val text: String,
     val confidence: Float? = null,
     val box: List<Int>? = null,
     val wordIndices: List<Int>? = null,
+)
+
+@Serializable
+data class WordLabelDto(
+    val wordIndex: Int,
+    val text: String,
+    val label: String,
+    val confidence: Float? = null,
+    val box: List<Int>? = null,
+    val wordId: String? = null,
+    val lineId: String? = null,
 )

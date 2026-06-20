@@ -1,3 +1,13 @@
 {
-  "sources": []
+  "sources": [
+    {
+      "source": "paddleocr",
+      "repository": "https://github.com/PaddlePaddle/PaddleOCR",
+      "revision": "ef346e0b402934477489001a4d253a20dbeb72a5",
+      "archive_url": "https://github.com/PaddlePaddle/PaddleOCR/archive/ef346e0b402934477489001a4d253a20dbeb72a5.zip",
+      "local_path": "tools\\receipt_ocr_compare\\vendor\\PaddleOCR",
+      "license": "Apache-2.0",
+      "download_time": "2026-06-20T20:57:57.743080+00:00"
+    }
+  ]
 }

@@ -114,7 +114,7 @@ def main():
             "Phase A: precomputed tensor ONNX smoke",
             "Phase B: Android preprocessing parity",
             "Phase C: OCR to label overlay MVP",
-            "Phase D: rel-g integration later",
+            "Phase D: span-level rel-g ONNX grouping",
         ],
         "labels_payload_keys": sorted(labels_payload.keys()),
     }

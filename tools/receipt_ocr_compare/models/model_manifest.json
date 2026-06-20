@@ -1,3 +1,108 @@
 {
-  "models": []
+  "models": [
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det/resolve/3cc09f3a5b424e8e010abc7a4271aea12999c2f7/config.json",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det",
+      "source_revision": "3cc09f3a5b424e8e010abc7a4271aea12999c2f7",
+      "checkpoint_filename": "config.json",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/det/config.json",
+      "checksum": "25b95390ab0264dc56cd61f88f61e110700eec419bf799e235230a50ff7591a9",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:12.681764+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det/resolve/3cc09f3a5b424e8e010abc7a4271aea12999c2f7/inference.json",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det",
+      "source_revision": "3cc09f3a5b424e8e010abc7a4271aea12999c2f7",
+      "checkpoint_filename": "inference.json",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/det/inference.json",
+      "checksum": "05feef1acb00aa4cd7362b15f7f501fc4f99d7b1fa73c1c871e0c7b1504b0f5c",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:13.021706+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det/resolve/3cc09f3a5b424e8e010abc7a4271aea12999c2f7/inference.pdiparams",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det",
+      "source_revision": "3cc09f3a5b424e8e010abc7a4271aea12999c2f7",
+      "checkpoint_filename": "inference.pdiparams",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/det/inference.pdiparams",
+      "checksum": "54a85087b4d31fa3ea4e4aba100169a1ec3e3274cd3352b9068b3cfccbca7829",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:13.634859+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det/resolve/3cc09f3a5b424e8e010abc7a4271aea12999c2f7/inference.yml",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det",
+      "source_revision": "3cc09f3a5b424e8e010abc7a4271aea12999c2f7",
+      "checkpoint_filename": "inference.yml",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/det/inference.yml",
+      "checksum": "4f5bd0def48e20194d87d4c184a3ae3007a1299de7fed0ef763d3e7e873e77f6",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:13.882041+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec/resolve/a2deb05cb05813be2da3365672881aa496d1452b/config.json",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec",
+      "source_revision": "a2deb05cb05813be2da3365672881aa496d1452b",
+      "checkpoint_filename": "config.json",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/rec/config.json",
+      "checksum": "26773626e73d17b4a6a6a39d15ee3a7820ddd05c3b71251894dc687e8174e81c",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:14.307346+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec/resolve/a2deb05cb05813be2da3365672881aa496d1452b/inference.json",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec",
+      "source_revision": "a2deb05cb05813be2da3365672881aa496d1452b",
+      "checkpoint_filename": "inference.json",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/rec/inference.json",
+      "checksum": "30f78ace76b2cce756abba97eb17f4c79e776d88ad68dd44a787a3db84b407a7",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:14.591223+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec/resolve/a2deb05cb05813be2da3365672881aa496d1452b/inference.pdiparams",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec",
+      "source_revision": "a2deb05cb05813be2da3365672881aa496d1452b",
+      "checkpoint_filename": "inference.pdiparams",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/rec/inference.pdiparams",
+      "checksum": "948b8d2ca6ad4bd7b64c0ee3fb838a06db87d4cf57137173ce409c995df21012",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:16.145293+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    },
+    {
+      "model_name": "paddleocr",
+      "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec/resolve/a2deb05cb05813be2da3365672881aa496d1452b/inference.yml",
+      "source_repository": "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec",
+      "source_revision": "a2deb05cb05813be2da3365672881aa496d1452b",
+      "checkpoint_filename": "inference.yml",
+      "local_checkpoint_path": "tools/receipt_ocr_compare/models/paddleocr/rec/inference.yml",
+      "checksum": "1207e8ba3d3dad6b99115f7febf515f5ffc0d87ed77366d7a4b4b3f1709c005d",
+      "license": "apache-2.0",
+      "download_time": "2026-06-20T21:02:16.435997+00:00",
+      "framework_version": null,
+      "reused_existing_file": false
+    }
+  ]
 }

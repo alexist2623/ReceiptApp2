@@ -17,6 +17,7 @@ user_ocr_inputs/
 receipt_samples/
 labeling/
 ReceiptApp/.gradle/
+ReceiptApp/.kotlin/
 ReceiptApp/.idea/
 ReceiptApp/**/build/
 ReceiptApp/local.properties
@@ -25,4 +26,7 @@ ReceiptApp/app/src/main/assets_dev/
 ReceiptApp/app/src/test/assets_dev/
 fixtures/
 artifacts/
+.codex-remote-attachments/
 *.hprof
+tools/receipt_ocr_compare/vendor/OpenOCR/
+tools/receipt_ocr_compare/vendor/PaddleOCR/

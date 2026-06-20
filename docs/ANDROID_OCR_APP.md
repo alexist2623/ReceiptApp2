@@ -13,13 +13,16 @@ The Android app currently handles:
 7. ZIP sharing,
 8. development HTTP upload.
 
-The app does not yet run:
+The app now has an on-device development path for:
 
-- LayoutLMv3 inference,
-- ITEM_NAME/ITEM_PRICE or legacy MENU_NM/MENU_PRICE prediction logic beyond OCR,
-- span-level rel-g grouping,
-- group_id prediction,
-- heuristic item-price grouping.
+- ML Kit OCR,
+- LayoutLMv3 INT8 ONNX field prediction,
+- span-level rel-g ONNX item/summary grouping,
+- dashboard and receipt-history UI backed by saved inference results.
+
+It does not predict `group_id` directly, and it does not use a y-coordinate or
+line-distance heuristic to connect items to prices. If the rel-g ONNX artifacts
+are missing, on-device inference fails with a model-file error.
 
 The app preserves ML Kit element-level raw OCR tokens. It does not merge tokens
 such as `$` and `16.99`, and it does not split line text manually. Receipt schema
@@ -27,12 +30,13 @@ v2 labels and BIO span normalization are applied later in the computer pipeline.
 
 ## Why Inference Is Abstracted
 
-Inference is separated behind `ReceiptInferenceEngine` so the app can use server-side inference now and later replace it with on-device LayoutLMv3/span-relg inference.
+Inference is separated behind `ReceiptInferenceEngine` so the app can use the
+on-device LayoutLMv3/span-relg path or a server-side implementation later.
 
 Current implementations:
 
 - `ServerReceiptInferenceEngine`
-- `OnDeviceReceiptInferenceEngine` stub
+- `OnDeviceReceiptInferenceEngine`
 - `MockReceiptInferenceEngine`
 
 ## Usage
@@ -43,7 +47,8 @@ Current implementations:
 4. Wait for OCR.
 5. Review OCR boxes on the canonical image.
 6. Share the ZIP or upload to a development server.
-7. Run the Python pipeline on the computer.
+7. If model artifacts are present, run on-device INT8 LayoutLMv3 + rel-g from the app.
+8. If model artifacts are not present, share the ZIP and run the Python pipeline on the computer.
 
 ## Server URL
 

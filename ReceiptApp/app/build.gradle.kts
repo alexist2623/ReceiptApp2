@@ -36,6 +36,17 @@ android {
         buildConfig = true
     }
 
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets", "src/main/assets_dev")
+        }
+    }
+
+    androidResources {
+        noCompress += "onnx"
+        noCompress += "data"
+    }
+
     kotlinOptions {
         jvmTarget = "17"
     }

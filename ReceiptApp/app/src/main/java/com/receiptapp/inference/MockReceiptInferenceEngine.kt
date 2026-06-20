@@ -6,6 +6,7 @@ class MockReceiptInferenceEngine : ReceiptInferenceEngine {
             ReceiptInferenceResponse(
                 captureId = input.captureId,
                 status = "mock",
+                storeName = FieldValueDto("mock store"),
                 items = listOf(
                     ReceiptItemDto(
                         itemIndex = 0,
