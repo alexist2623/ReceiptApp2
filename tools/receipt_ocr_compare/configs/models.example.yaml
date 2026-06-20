@@ -1,0 +1,21 @@
+models:
+  svtrv2_b:
+    adapter: svtrv2_b
+    source_repository: https://github.com/Topdu/OpenOCR
+    source_docs: https://github.com/Topdu/OpenOCR/blob/main/configs/rec/svtrv2/readme.md
+    checkpoint_dir: tools/receipt_ocr_compare/models/svtrv2_b
+    vendor_dir: tools/receipt_ocr_compare/vendor/OpenOCR
+    primary_metric_text: raw_text
+    correction_policy: optional_only
+  paddleocr:
+    adapter: paddleocr
+    source_repository:
+      detection: https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det
+      recognition: https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_rec
+    checkpoint_dir: tools/receipt_ocr_compare/models/paddleocr
+    vendor_dir: tools/receipt_ocr_compare/vendor/PaddleOCR
+    detector_separate_from_recognizer: true
+  existing:
+    adapter: existing
+    runner_env_var: RECEIPT_EXISTING_OCR_CMD
+
