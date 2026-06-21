@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.bio_repair import repair_bio_boundaries
+from ml.angle_geometry import ANGLE_FEATURE_DIM, build_angle_features_for_words
 from ml.receipt_schema import canonicalize_field
 from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3
 from ml.span_relg.schema import ALL_FIELDS, DEP_FIELDS, HEAD_FIELDS, is_dependent_field, is_head_field
@@ -41,6 +42,9 @@ def parse_args():
     parser.add_argument("--local_files_only", action="store_true")
     parser.add_argument("--include_context_tokens", default="all", choices=("all", "o_only", "none"))
     parser.add_argument("--span_pooling", default="first", choices=("first", "mean"))
+    parser.add_argument("--use_angle_features", default="auto", choices=("auto", "true", "false"))
+    parser.add_argument("--disable_angle_features", action="store_true")
+    parser.add_argument("--angle_debug", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
@@ -275,6 +279,7 @@ def make_sample_info(record, repair_labels=False):
     boxes = []
     normalized_boxes = []
     predictions = []
+    word_payloads = []
     word_original_indices = []
     skipped = []
     for idx, word in enumerate(raw_words):
@@ -291,6 +296,7 @@ def make_sample_info(record, repair_labels=False):
         words.append(text)
         boxes.append(box)
         normalized_boxes.append(norm)
+        word_payloads.append(word)
         word_original_indices.append(idx)
         predictions.append(
             {
@@ -325,6 +331,12 @@ def make_sample_info(record, repair_labels=False):
     group_by_span_id = {span["span_id"]: span.get("group_key") for span in relation_spans}
     for span in spans:
         span["group_key"] = group_by_span_id.get(span["span_id"])
+    angle_features, angle_debug = build_angle_features_for_words(
+        word_payloads,
+        boxes=boxes,
+        image_width=width,
+        image_height=height,
+    )
     return {
         "image": image,
         "width": width,
@@ -332,6 +344,11 @@ def make_sample_info(record, repair_labels=False):
         "words": words,
         "boxes": boxes,
         "normalized_boxes": normalized_boxes,
+        "word_payloads": word_payloads,
+        "angle_features": angle_features,
+        "angle_debug": angle_debug,
+        "num_words_with_angle": sum(1 for row in angle_debug if row.get("has_angle")),
+        "num_words_without_angle": sum(1 for row in angle_debug if not row.get("has_angle")),
         "word_original_indices": word_original_indices,
         "predictions": predictions,
         "spans": spans,
@@ -368,8 +385,22 @@ def main():
     print(f"torch: {torch.__version__}")
     print(f"cuda_available: {torch.cuda.is_available()}")
 
-    processor, layout_model, device = load_layoutlmv3(args.layout_checkpoint, args.local_files_only, args.device)
+    use_angle_features = "false" if args.disable_angle_features else args.use_angle_features
+    if use_angle_features == "true":
+        use_angle_features_for_model = True
+    elif use_angle_features == "false":
+        use_angle_features_for_model = False
+    else:
+        use_angle_features_for_model = "auto"
+    processor, layout_model, device = load_layoutlmv3(
+        args.layout_checkpoint,
+        args.local_files_only,
+        args.device,
+        use_angle_features=use_angle_features_for_model,
+    )
     print(f"selected device: {device}")
+    print(f"use_angle_features: {use_angle_features}")
+    print(f"layout_model_uses_angle_features: {getattr(layout_model, 'uses_angle_features', False)}")
     if torch.cuda.is_available():
         print(f"cuda device: {torch.cuda.get_device_name(0)}")
     field2id = {field: idx for idx, field in enumerate(ALL_FIELDS)}
@@ -384,6 +415,8 @@ def main():
         "max_length": args.max_length,
         "include_context_tokens": args.include_context_tokens,
         "span_pooling": args.span_pooling,
+        "use_angle_features": use_angle_features,
+        "angle_feature_dim": ANGLE_FEATURE_DIM,
         "split_manifest": args.split_manifest,
         "repair_bio_boundaries": args.repair_bio_boundaries,
         "splits": {},
@@ -391,6 +424,7 @@ def main():
         "skipped_spans": [],
         "field_counts": {},
         "pair_field_counts": {},
+        "angle_counts": {},
     }
     hidden_dim = None
     field_counts = Counter()
@@ -412,6 +446,11 @@ def main():
                     layout_model,
                     device,
                     max_length=args.max_length,
+                    word_angle_features=(
+                        sample_info["angle_features"]
+                        if getattr(layout_model, "uses_angle_features", False) or use_angle_features == "true"
+                        else None
+                    ),
                 )
                 cache = build_cache_sample(
                     data_id,
@@ -428,6 +467,10 @@ def main():
                 cache["source_label_json"] = record["label_json"]
                 cache["word_token_indices"] = word_features["word_token_indices"]
                 cache["encoding_shapes"] = word_features["encoding_shapes"]
+                cache["uses_angle_features"] = word_features.get("uses_angle_features", False)
+                cache["angle_features_shape"] = word_features.get("angle_features_shape")
+                if args.angle_debug:
+                    cache["angle_debug"] = sample_info.get("angle_debug", [])
                 if cache["candidate_pairs"].numel() == 0:
                     raise ValueError("No candidate rel-g pairs found.")
                 sample_path = split_dir / f"{data_id}.pt"
@@ -442,6 +485,8 @@ def main():
                 counters["positive_pairs"] += int(cache["pair_labels"].sum().item())
                 counters["negative_pairs"] += int(cache["pair_labels"].numel() - cache["pair_labels"].sum().item())
                 counters["assigned_relation_groups"] += sample_info["assigned_relation_groups"]
+                counters["words_with_angle"] += sample_info.get("num_words_with_angle", 0)
+                counters["words_without_angle"] += sample_info.get("num_words_without_angle", 0)
                 counters["skipped_non_relg_spans"] += len(sample_info.get("skipped_spans", []))
                 for skipped_span in sample_info.get("skipped_spans", [])[:20]:
                     summary["skipped_spans"].append({"id": data_id, "split": split, **skipped_span})
@@ -456,7 +501,8 @@ def main():
                 if args.debug:
                     print(
                         f"{data_id}: spans={sum(1 for n in cache['nodes'] if n.get('node_kind') == 'SPAN')} "
-                        f"pairs={cache['pair_labels'].numel()} positives={int(cache['pair_labels'].sum().item())}"
+                        f"pairs={cache['pair_labels'].numel()} positives={int(cache['pair_labels'].sum().item())} "
+                        f"angle_words={sample_info.get('num_words_with_angle', 0)}/{len(sample_info['words'])}"
                     )
             except Exception as exc:
                 counters["input_samples"] += 1
@@ -479,7 +525,10 @@ def main():
             "LayoutLMv3 is used only as a frozen feature extractor for rel-g cache building.",
             "Pair labels are binary relation labels derived from item_relations/summary_relations/payment_relations/relations/rel_g_edges.",
             "Optional BIO boundary repair can be enabled with --repair_bio_boundaries.",
+            "Optional angle-aware LayoutLMv3 hidden states can be enabled with --use_angle_features true/auto.",
         ],
+        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "uses_angle_features": bool(getattr(layout_model, "uses_angle_features", False)),
     }
     summary["field_counts"] = dict(field_counts)
     summary["pair_field_counts"] = dict(pair_field_counts)

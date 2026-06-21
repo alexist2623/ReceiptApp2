@@ -14,6 +14,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from ml.angle_geometry import ANGLE_FEATURE_DIM, align_angle_features_to_tokens
+from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier
 from ml.span_relg.cord_spans import extract_cord_words_and_lines
 from ml.span_relg.decode import decode_edges_to_items
 from ml.span_relg.feature_cache import build_cache_sample
@@ -43,6 +45,7 @@ def parse_args():
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--local_files_only", action="store_true")
+    parser.add_argument("--use_angle_features", default="auto", choices=("auto", "true", "false"))
     parser.add_argument("--sweep_thresholds", action="store_true")
     parser.add_argument("--save_overlay_limit", type=int, default=30)
     parser.add_argument("--debug", action="store_true")
@@ -87,22 +90,45 @@ def load_layout_labels(checkpoint, model):
     return label2id, id2label, "model.config"
 
 
-def load_layoutlmv3(checkpoint, local_files_only, device):
+def checkpoint_looks_angle_aware(checkpoint):
+    checkpoint = Path(checkpoint)
+    if (checkpoint / "angle_model_config.json").exists():
+        return True
+    config_path = checkpoint / "config.json"
+    if config_path.exists():
+        try:
+            payload = load_json(config_path)
+            return bool(payload.get("use_angle_features") or payload.get("angle_feature_dim"))
+        except Exception:
+            return False
+    return False
+
+
+def load_layoutlmv3(checkpoint, local_files_only, device, use_angle_features="auto"):
     processor = AutoProcessor.from_pretrained(
         checkpoint,
         apply_ocr=False,
         local_files_only=local_files_only,
     )
-    model = AutoModelForTokenClassification.from_pretrained(
-        checkpoint,
-        local_files_only=local_files_only,
-    )
+    use_angle = checkpoint_looks_angle_aware(checkpoint) if use_angle_features == "auto" else use_angle_features == "true"
+    if use_angle:
+        model = load_angle_aware_token_classifier(
+            checkpoint,
+            local_files_only=local_files_only,
+            ignore_mismatched_sizes=True,
+        )
+    else:
+        model = AutoModelForTokenClassification.from_pretrained(
+            checkpoint,
+            local_files_only=local_files_only,
+        )
     label2id, id2label, label_source = load_layout_labels(checkpoint, model)
     model.config.label2id = label2id
     model.config.id2label = id2label
     model.to(device)
     model.eval()
     model.requires_grad_(False)
+    model.uses_angle_features = use_angle
     return processor, model, label2id, id2label, label_source
 
 
@@ -149,7 +175,7 @@ def make_gold_word_labels(extracted):
     return labels
 
 
-def run_layout_prediction(image, words, boxes, processor, model, device, id2label, max_length):
+def run_layout_prediction(image, words, boxes, processor, model, device, id2label, max_length, angle_features=None):
     encoding = processor(
         image,
         words,
@@ -165,6 +191,9 @@ def run_layout_prediction(image, words, boxes, processor, model, device, id2labe
         for key, value in encoding.items()
         if key in {"input_ids", "attention_mask", "bbox", "pixel_values", "token_type_ids"}
     }
+    if getattr(model, "uses_angle_features", False) or angle_features is not None:
+        token_angle = align_angle_features_to_tokens(encoding, angle_features or [], batch_index=0)
+        model_inputs["angle_features"] = token_angle.unsqueeze(0).to(device)
     with torch.no_grad():
         outputs = model(**model_inputs, output_hidden_states=True, return_dict=True)
     logits = outputs.logits[0].detach().cpu()
@@ -209,6 +238,7 @@ def run_layout_prediction(image, words, boxes, processor, model, device, id2labe
         "word_hidden": torch.stack(word_hidden, dim=0),
         "word_token_indices": [first_token_for_word[idx] for idx in range(len(words))],
         "encoding_shapes": {key: list(value.shape) for key, value in encoding.items() if hasattr(value, "shape")},
+        "angle_features_shape": list(model_inputs["angle_features"].shape) if "angle_features" in model_inputs else None,
         "token_debug": token_debug,
     }
 
@@ -576,7 +606,12 @@ def main():
     field_vocab = resolve_field_vocab(span_relg_dataset_dir, relg_checkpoint)
     field2id = {str(key): int(value) for key, value in field_vocab["vocab"].items()}
     kind2id, kind_source = resolve_kind_vocab(span_relg_dataset_dir, relg_checkpoint)
-    processor, layout_model, label2id, id2label, label_source = load_layoutlmv3(layout_checkpoint, args.local_files_only, device)
+    processor, layout_model, label2id, id2label, label_source = load_layoutlmv3(
+        layout_checkpoint,
+        args.local_files_only,
+        device,
+        use_angle_features=args.use_angle_features,
+    )
     rel_model, rel_config, rel_config_path = load_rel_model(relg_checkpoint, device)
     include_context_tokens = rel_config.get("include_context_tokens", "all")
     span_pooling = rel_config.get("span_pooling", "first")
@@ -593,6 +628,9 @@ def main():
     print(f"field vocab source: {field_vocab['source']}::{field_vocab['key']}")
     print(f"kind vocab source: {kind_source}")
     print(f"layout label source: {label_source}")
+    print(f"use_angle_features: {args.use_angle_features}")
+    print(f"layout_model_uses_angle_features: {getattr(layout_model, 'uses_angle_features', False)}")
+    print(f"angle_feature_dim: {ANGLE_FEATURE_DIM}")
     print(f"processing split={args.split} samples={limit}/{total}")
 
     samples = []
@@ -625,6 +663,11 @@ def main():
                     device,
                     id2label,
                     args.max_length,
+                    angle_features=(
+                        extracted.get("angle_features")
+                        if getattr(layout_model, "uses_angle_features", False) or args.use_angle_features == "true"
+                        else None
+                    ),
                 )
                 predictions = attach_boxes_to_predictions(layout["predictions"], extracted["boxes"], extracted["normalized_boxes"])
                 for pred, gold in zip(predictions, gold_labels):
@@ -648,6 +691,7 @@ def main():
                     "words": extracted["words"],
                     "boxes": extracted["boxes"],
                     "normalized_boxes": extracted["normalized_boxes"],
+                    "angle_features": extracted.get("angle_features"),
                     "predictions": predictions,
                     "spans": filtered_spans,
                 }
@@ -767,6 +811,9 @@ def main():
             "field_vocab_key": field_vocab["key"],
             "kind_vocab_source": kind_source,
             "layout_label_source": label_source,
+            "use_angle_features": args.use_angle_features,
+            "layout_model_uses_angle_features": bool(getattr(layout_model, "uses_angle_features", False)),
+            "angle_feature_dim": ANGLE_FEATURE_DIM,
         },
     )
     if args.sweep_thresholds:

@@ -17,6 +17,18 @@ The top-level `words` array is required for the Python pipeline. Each word must 
 Those coordinates must be in the saved JPG pixel space, not the original camera
 sensor size and not a resized preview size.
 
+Each word may also include optional angle-aware geometry:
+
+- `cornerPoints`: four `[x, y]` points from the OCR engine, in saved JPG pixel coordinates
+- `quad`: equivalent four-point quadrilateral, if the OCR/exporter uses this name
+- `angleDeg` or `angle_deg`: text baseline angle in degrees, normalized to `[-180, 180]`
+
+`box` remains required and is still the only geometry consumed by the standard
+LayoutLMv3 path. Angle-aware experiments use the optional 4-point geometry or
+angle value to build an extra token-aligned `angle_features` tensor. If these
+fields are missing, angle features are all zeros and existing behavior is
+unchanged.
+
 ## Coordinate Space
 
 All boxes are relative to the saved canonical image:
@@ -86,7 +98,9 @@ image/JSON pair must not be used for training.
       "wordIndexInLine": 0,
       "globalWordIndex": 0,
       "text": "americano",
-      "box": [120, 340, 310, 385]
+      "box": [120, 340, 310, 385],
+      "cornerPoints": [[120, 342], [309, 340], [310, 382], [121, 385]],
+      "angleDeg": -0.6
     }
   ],
   "blocks": [],

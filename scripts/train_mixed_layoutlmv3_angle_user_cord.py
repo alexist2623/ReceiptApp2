@@ -1,17 +1,18 @@
 import argparse
 import json
 import math
-import re
 import shutil
 import sys
 from collections import Counter
 from pathlib import Path
 
 import torch
+from datasets import load_from_disk
+from PIL import Image, ImageOps
 from seqeval.metrics import f1_score, precision_score, recall_score
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AutoModelForTokenClassification, AutoProcessor, get_linear_schedule_with_warmup
+from transformers import AutoProcessor, get_linear_schedule_with_warmup
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -20,37 +21,42 @@ if str(ROOT_DIR) not in sys.path:
 from ml.angle_geometry import ANGLE_FEATURE_DIM
 from ml.layoutlmv3_angle_inputs import encoding_with_angle_features
 from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier, save_angle_aware_model_bundle
-from ml.layoutlmv3_training import encode_layoutlmv3_with_ignore
-from scripts.smoke_finetune_user_labels_v2 import load_label_schema, load_labeled_sample
+from ml.layoutlmv3_training import is_ignore_label, labels_to_ids_with_ignore
+from ml.receipt_schema import canonicalize_label
+from scripts.smoke_finetune_user_labels_v2 import (
+    clamp_box,
+    load_label_schema,
+    load_labeled_sample,
+    normalize_box,
+    parse_box,
+)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Fine-tune LayoutLMv3 on user labeled receipt JSON files.")
-    parser.add_argument("--input_dir", required=True, nargs="+", help="One or more directories containing *_receipt_ocr folders.")
+    parser = argparse.ArgumentParser(description="Fine-tune angle-aware LayoutLMv3 on mixed CORD BIO + non-Temp user labels.")
+    parser.add_argument("--cord_bio_dir", default="processed_data/cord_bio")
+    parser.add_argument("--cord_raw_data_dir", default="../receipt_training_data2")
+    parser.add_argument("--user_input_dir", required=True)
     parser.add_argument("--exclude_dir_name", default="Temp")
     parser.add_argument("--label_schema", default="schemas/receipt_labels_v2.json")
     parser.add_argument("--model_name_or_path", default="models/layoutlmv3-cord-full/best")
     parser.add_argument("--local_files_only", action="store_true")
-    parser.add_argument("--output_dir", default="models/layoutlmv3-user-labels-non-temp")
+    parser.add_argument("--output_dir", default="models/layoutlmv3-angle-mixed-cord-user-non-temp")
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--learning_rate", type=float, default=5e-5)
     parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--eval_batch_size", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--eval_batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--max_length", type=int, default=512)
-    parser.add_argument("--validation_ratio", type=float, default=0.2)
-    parser.add_argument("--validation_count", type=int, default=None)
-    parser.add_argument("--split_by_parent", action="store_true", help="Split by parent capture id to avoid original/augmented leakage.")
-    parser.add_argument("--validation_parent_count", type=int, default=None)
-    parser.add_argument("--validation_augmented", action="store_true", help="Include augmented records in validation. Default keeps validation on originals only.")
-    parser.add_argument("--max_train_samples", type=int, default=None)
-    parser.add_argument("--max_eval_samples", type=int, default=None)
+    parser.add_argument("--max_cord_train_samples", type=int, default=None)
+    parser.add_argument("--max_cord_eval_samples", type=int, default=None)
+    parser.add_argument("--user_validation_count", type=int, default=3)
+    parser.add_argument("--user_repeat", type=int, default=10)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--plot_path", default=None)
-    parser.add_argument("--use_angle_features", action="store_true")
     parser.add_argument("--angle_first_subword_only", action="store_true")
     parser.add_argument("--overwrite_output_dir", action="store_true")
     parser.add_argument("--debug", action="store_true")
@@ -79,138 +85,151 @@ def select_device(device):
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def path_is_excluded(path, exclude_dir_name):
-    if not exclude_dir_name:
-        return False
-    needle = exclude_dir_name.lower()
-    return any(needle in part.lower() for part in Path(path).parts)
+def load_jsonl(path):
+    with Path(path).open("r", encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
 
 
-def read_parent_capture_id(label_path, capture_id):
-    try:
-        with Path(label_path).open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except Exception:
-        payload = {}
-    augmentation = payload.get("augmentation") if isinstance(payload, dict) else None
-    if isinstance(augmentation, dict) and augmentation.get("parent_capture_id"):
-        return str(augmentation["parent_capture_id"]), True
-    for key in ("parent_capture_id", "parentCaptureId"):
-        if isinstance(payload, dict) and payload.get(key):
-            return str(payload[key]), True
-    match = re.match(r"(.+?)_aug_\d{3}_[0-9a-fA-F]+$", capture_id)
-    if match:
-        return match.group(1), True
-    return capture_id, False
+def limit_records(records, max_samples):
+    if max_samples is None:
+        return records
+    return records[: max(0, int(max_samples))]
 
 
-def collect_label_pairs(input_dirs, exclude_dir_name):
-    input_dirs = [Path(path) for path in input_dirs]
-    for input_dir in input_dirs:
-        if not input_dir.exists():
-            fail(f"input_dir not found: {input_dir}")
-    all_labels = []
-    for input_dir in input_dirs:
-        all_labels.extend(sorted(input_dir.rglob("*_labeled_v2_1.json")))
-    excluded = [path for path in all_labels if path_is_excluded(path, exclude_dir_name)]
+def collect_user_pairs(input_dir, exclude_dir_name):
+    input_dir = Path(input_dir)
+    if not input_dir.exists():
+        fail(f"user_input_dir not found: {input_dir}")
+    all_labels = sorted(input_dir.rglob("*_labeled_v2_1.json"))
+    excluded = [path for path in all_labels if exclude_dir_name and exclude_dir_name in path.parts]
     labels = [path for path in all_labels if path not in excluded]
     pairs = []
-    missing_images = []
     for label_path in labels:
         capture_id = label_path.name.replace("_labeled_v2_1.json", "")
         image_path = label_path.with_name(f"{capture_id}.jpg")
         if not image_path.exists():
-            missing_images.append(str(image_path))
-            continue
-        parent_id, is_augmented = read_parent_capture_id(label_path, capture_id)
-        pairs.append(
-            {
-                "id": capture_id,
-                "parent_id": parent_id,
-                "is_augmented": is_augmented,
-                "image": str(image_path),
-                "label_json": str(label_path),
-                "source_dir": str(next((root for root in input_dirs if root in label_path.parents), label_path.parent)),
-            }
-        )
-    if missing_images:
-        fail(f"Missing images for labeled JSON files: {missing_images[:10]}")
+            fail(f"image not found for {label_path}: {image_path}")
+        pairs.append({"source": "user", "id": capture_id, "image": str(image_path), "label_json": str(label_path)})
     if len(pairs) < 2:
-        fail("Need at least two non-Temp labeled samples for train/validation split.")
+        fail("Need at least two non-Temp user samples.")
     return pairs, excluded
 
 
-def split_pairs(
-    pairs,
-    validation_ratio,
-    validation_count,
-    split_by_parent=False,
-    validation_parent_count=None,
-    validation_augmented=False,
-):
+def split_user_pairs(pairs, validation_count):
     pairs = list(sorted(pairs, key=lambda item: item["id"]))
-    if split_by_parent:
-        parent_ids = sorted({item.get("parent_id") or item["id"] for item in pairs})
-        if len(parent_ids) < 2:
-            fail("Need at least two parent capture ids for parent-aware split.")
-        if validation_parent_count is None:
-            validation_parent_count = validation_count
-        if validation_parent_count is None:
-            validation_parent_count = max(1, int(round(len(parent_ids) * validation_ratio)))
-        validation_parent_count = max(1, min(int(validation_parent_count), len(parent_ids) - 1))
-        validation_parents = set(parent_ids[-validation_parent_count:])
-        train_records = [item for item in pairs if (item.get("parent_id") or item["id"]) not in validation_parents]
-        validation_records = [
-            item
-            for item in pairs
-            if (item.get("parent_id") or item["id"]) in validation_parents
-            and (validation_augmented or not item.get("is_augmented"))
-        ]
-        if not validation_records:
-            validation_records = [item for item in pairs if (item.get("parent_id") or item["id"]) in validation_parents]
-        return train_records, validation_records
-    if validation_count is None:
-        validation_count = max(1, int(round(len(pairs) * validation_ratio)))
     validation_count = max(1, min(int(validation_count), len(pairs) - 1))
     return pairs[:-validation_count], pairs[-validation_count:]
 
 
-def limit_samples(records, max_samples):
-    if max_samples is None:
-        return records
-    return list(records)[: max(0, int(max_samples))]
+def load_cord_records(cord_bio_dir, split, max_samples):
+    path = Path(cord_bio_dir) / f"{split}.jsonl"
+    if not path.exists():
+        fail(f"CORD BIO split not found: {path}")
+    records = limit_records(load_jsonl(path), max_samples)
+    for record in records:
+        record["source"] = "cord"
+    return records
 
 
-class UserReceiptLabelDataset(Dataset):
-    def __init__(self, records, label2id):
+def image_to_rgb(image):
+    if isinstance(image, Image.Image):
+        return ImageOps.exif_transpose(image).convert("RGB")
+    return Image.open(image).convert("RGB")
+
+
+def canonicalize_label_list(labels, label2id):
+    out = []
+    unknown = []
+    for label in labels:
+        if is_ignore_label(label):
+            out.append("IGNORE")
+            continue
+        canonical = canonicalize_label(label)
+        if canonical not in label2id:
+            unknown.append({"label": label, "canonical_label": canonical})
+        out.append(canonical)
+    if unknown:
+        fail(f"Unknown labels after canonicalization: {unknown[:20]}")
+    return out
+
+
+class MixedReceiptDataset(Dataset):
+    def __init__(self, records, label2id, raw_dataset=None):
         self.records = list(records)
         self.label2id = label2id
+        self.raw_dataset = raw_dataset
 
     def __len__(self):
         return len(self.records)
 
     def __getitem__(self, idx):
         record = self.records[idx]
-        sample = load_labeled_sample(record["image"], record["label_json"], self.label2id)
-        sample["id"] = record["id"]
-        sample["image_path"] = record["image"]
-        sample["label_json"] = record["label_json"]
-        return sample
+        if record.get("source") == "user":
+            sample = load_labeled_sample(record["image"], record["label_json"], self.label2id)
+            sample["id"] = record["id"]
+            sample["source"] = "user"
+            return sample
+        split = record["split"]
+        raw = self.raw_dataset[split][int(record["index"])]
+        image = image_to_rgb(raw["image"])
+        width, height = image.size
+        words = [str(word) for word in record["words"]]
+        labels = canonicalize_label_list(record["labels"], self.label2id)
+        normalized_boxes = [[int(v) for v in box] for box in record["normalized_boxes"]]
+        boxes = record.get("boxes")
+        if boxes is None:
+            boxes = [
+                [
+                    int(round(box[0] * width / 1000)),
+                    int(round(box[1] * height / 1000)),
+                    int(round(box[2] * width / 1000)),
+                    int(round(box[3] * height / 1000)),
+                ]
+                for box in normalized_boxes
+            ]
+        boxes = [clamp_box(parse_box(box), width, height) for box in boxes]
+        keep_words = []
+        keep_boxes = []
+        keep_normalized = []
+        keep_labels = []
+        for word, box, norm, label in zip(words, boxes, normalized_boxes, labels):
+            if not str(word).strip() or box is None:
+                continue
+            keep_words.append(str(word))
+            keep_boxes.append(box)
+            keep_normalized.append([max(0, min(int(v), 1000)) for v in norm])
+            keep_labels.append(label)
+        if not keep_words:
+            fail(f"CORD record has no valid words: {record.get('id')}")
+        label_ids, ignored_word_indices = labels_to_ids_with_ignore(keep_labels, self.label2id)
+        return {
+            "id": record["id"],
+            "source": "cord",
+            "image": image,
+            "width": width,
+            "height": height,
+            "words": keep_words,
+            "boxes": keep_boxes,
+            "normalized_boxes": keep_normalized,
+            "labels": keep_labels,
+            "label_ids": label_ids,
+            "ignore_word_indices": ignored_word_indices,
+            "warnings": [],
+            "skipped": [],
+        }
 
 
-def collate_fn(processor, max_length, use_angle_features=False, angle_first_subword_only=False):
+def collate_fn(processor, max_length, angle_first_subword_only=False):
     def collate(samples):
-        if use_angle_features:
-            encoding = encoding_with_angle_features(
-                processor,
-                samples,
-                max_length,
-                include_labels=True,
-                first_subword_only=angle_first_subword_only,
-            )
-        else:
-            encoding = encode_layoutlmv3_with_ignore(processor, samples, max_length)
+        encoding = encoding_with_angle_features(
+            processor,
+            samples,
+            max_length,
+            include_labels=True,
+            first_subword_only=angle_first_subword_only,
+        )
         encoding["record_ids"] = [sample["id"] for sample in samples]
+        encoding["sources"] = [sample["source"] for sample in samples]
         return encoding
 
     return collate
@@ -231,7 +250,7 @@ def evaluate(model, loader, device, id2label):
     correct = 0
     true_sequences = []
     pred_sequences = []
-    pred_counts = Counter()
+    source_counts = Counter()
     with torch.no_grad():
         for batch in loader:
             model_batch = move_batch(batch, device)
@@ -245,17 +264,15 @@ def evaluate(model, loader, device, id2label):
             total_tokens += token_count
             preds = outputs.logits.argmax(dim=-1)
             correct += int(((preds == labels) & mask).sum().item())
+            source_counts.update(batch.get("sources", []))
             for sample_idx in range(labels.shape[0]):
                 sample_true = []
                 sample_pred = []
                 for label_id, pred_id, keep in zip(labels[sample_idx].tolist(), preds[sample_idx].tolist(), mask[sample_idx].tolist()):
                     if not keep:
                         continue
-                    true_label = id2label[int(label_id)]
-                    pred_label = id2label[int(pred_id)]
-                    sample_true.append(true_label)
-                    sample_pred.append(pred_label)
-                    pred_counts[pred_label] += 1
+                    sample_true.append(id2label[int(label_id)])
+                    sample_pred.append(id2label[int(pred_id)])
                 if sample_true:
                     true_sequences.append(sample_true)
                     pred_sequences.append(sample_pred)
@@ -266,7 +283,7 @@ def evaluate(model, loader, device, id2label):
         "seqeval_recall": recall_score(true_sequences, pred_sequences, zero_division=0) if true_sequences else 0.0,
         "seqeval_f1": f1_score(true_sequences, pred_sequences, zero_division=0) if true_sequences else 0.0,
         "num_eval_tokens": total_tokens,
-        "prediction_label_counts": dict(pred_counts),
+        "source_counts": dict(source_counts),
     }
     model.train()
     return metrics
@@ -308,22 +325,13 @@ def plot_history(path, history, best_epoch):
     return path
 
 
-def save_model_bundle(path, model, processor, labels_payload, use_angle_features=False):
-    if use_angle_features:
-        save_angle_aware_model_bundle(path, model, processor, labels_payload)
-        return
-    path = Path(path)
-    path.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(path)
-    processor.save_pretrained(path)
-    save_json(path / "labels.json", labels_payload)
+def save_model_bundle(path, model, processor, labels_payload):
+    save_angle_aware_model_bundle(path, model, processor, labels_payload)
 
 
 def main():
     args = parse_args()
     torch.manual_seed(args.seed)
-    if args.device == "auto" and not torch.cuda.is_available():
-        print("WARNING: CUDA is not available. This user-label fine-tune will run on CPU.")
     output_dir = Path(args.output_dir)
     if output_dir.exists():
         if not args.overwrite_output_dir:
@@ -333,24 +341,20 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     labels_payload, label_list, label2id, id2label = load_label_schema(args.label_schema)
-    records, excluded = collect_label_pairs(args.input_dir, args.exclude_dir_name)
-    train_records, validation_records = split_pairs(
-        records,
-        args.validation_ratio,
-        args.validation_count,
-        split_by_parent=args.split_by_parent,
-        validation_parent_count=args.validation_parent_count,
-        validation_augmented=args.validation_augmented,
-    )
-    train_records = limit_samples(train_records, args.max_train_samples)
-    validation_records = limit_samples(validation_records, args.max_eval_samples)
-    print(f"input_dir: {args.input_dir}")
-    print(f"all non-Temp records: {len(records)}")
+    cord_train = load_cord_records(args.cord_bio_dir, "train", args.max_cord_train_samples)
+    cord_eval = load_cord_records(args.cord_bio_dir, "validation", args.max_cord_eval_samples)
+    user_pairs, excluded = collect_user_pairs(args.user_input_dir, args.exclude_dir_name)
+    user_train, user_eval = split_user_pairs(user_pairs, args.user_validation_count)
+    train_records = list(cord_train) + user_train * max(1, int(args.user_repeat))
+    eval_records = list(cord_eval) + user_eval
+
+    print(f"cord train samples: {len(cord_train)}")
+    print(f"cord validation samples: {len(cord_eval)}")
+    print(f"user train samples: {len(user_train)} repeated x{args.user_repeat}")
+    print(f"user validation samples: {len(user_eval)}")
     print(f"excluded Temp labels: {len(excluded)}")
-    print(f"parent ids: {len({record.get('parent_id') or record['id'] for record in records})}")
-    print(f"augmented records: {sum(1 for record in records if record.get('is_augmented'))}")
-    print(f"train samples: {len(train_records)}")
-    print(f"validation samples: {len(validation_records)}")
+    print(f"mixed train records per epoch: {len(train_records)}")
+    print(f"mixed validation records: {len(eval_records)}")
     print(f"python: {sys.executable}")
     print(f"torch: {torch.__version__}")
     print(f"cuda_available: {torch.cuda.is_available()}")
@@ -359,44 +363,32 @@ def main():
     if torch.cuda.is_available():
         print(f"cuda device: {torch.cuda.get_device_name(0)}")
 
+    print("Loading CORD raw dataset for images...")
+    raw_dataset = load_from_disk(args.cord_raw_data_dir)
     processor = AutoProcessor.from_pretrained(args.model_name_or_path, apply_ocr=False, local_files_only=args.local_files_only)
-    if args.use_angle_features:
-        model = load_angle_aware_token_classifier(
-            args.model_name_or_path,
-            num_labels=len(label_list),
-            id2label={idx: label for idx, label in id2label.items()},
-            label2id=label2id,
-            ignore_mismatched_sizes=True,
-            local_files_only=args.local_files_only,
-        )
-    else:
-        model = AutoModelForTokenClassification.from_pretrained(
-            args.model_name_or_path,
-            num_labels=len(label_list),
-            id2label={idx: label for idx, label in id2label.items()},
-            label2id=label2id,
-            ignore_mismatched_sizes=True,
-            local_files_only=args.local_files_only,
-        )
+    model = load_angle_aware_token_classifier(
+        args.model_name_or_path,
+        num_labels=len(label_list),
+        id2label={idx: label for idx, label in id2label.items()},
+        label2id=label2id,
+        ignore_mismatched_sizes=True,
+        local_files_only=args.local_files_only,
+    )
     model.to(device)
-    print(f"use_angle_features: {args.use_angle_features}")
-    print(f"angle_feature_dim: {ANGLE_FEATURE_DIM if args.use_angle_features else 0}")
 
-    train_dataset = UserReceiptLabelDataset(train_records, label2id)
-    eval_dataset = UserReceiptLabelDataset(validation_records, label2id)
     train_loader = DataLoader(
-        train_dataset,
+        MixedReceiptDataset(train_records, label2id, raw_dataset),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=0,
-        collate_fn=collate_fn(processor, args.max_length, args.use_angle_features, args.angle_first_subword_only),
+        collate_fn=collate_fn(processor, args.max_length, args.angle_first_subword_only),
     )
     eval_loader = DataLoader(
-        eval_dataset,
+        MixedReceiptDataset(eval_records, label2id, raw_dataset),
         batch_size=args.eval_batch_size,
         shuffle=False,
         num_workers=0,
-        collate_fn=collate_fn(processor, args.max_length, args.use_angle_features, args.angle_first_subword_only),
+        collate_fn=collate_fn(processor, args.max_length, args.angle_first_subword_only),
     )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -408,9 +400,6 @@ def main():
     )
     use_fp16 = args.fp16 and device.type == "cuda"
     scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
-    if args.fp16 and not use_fp16:
-        print("WARNING: --fp16 requested without CUDA; disabled fp16.")
-
     history = []
     best_epoch = None
     best_f1 = -1.0
@@ -419,11 +408,12 @@ def main():
         model.train()
         running_loss = 0.0
         running_tokens = 0
+        source_counts = Counter()
         optimizer.zero_grad(set_to_none=True)
-        for step, batch in enumerate(tqdm(train_loader, desc=f"layout epoch {epoch:03d}/{args.epochs:03d}", unit="batch"), start=1):
+        for step, batch in enumerate(tqdm(train_loader, desc=f"mixed layout epoch {epoch:03d}/{args.epochs:03d}", unit="batch"), start=1):
+            source_counts.update(batch.get("sources", []))
             model_batch = move_batch(batch, device)
-            labels = model_batch["labels"]
-            token_count = int((labels != -100).sum().item())
+            token_count = int((model_batch["labels"] != -100).sum().item())
             with torch.cuda.amp.autocast(enabled=use_fp16):
                 outputs = model(**model_batch)
                 loss = outputs.loss / args.gradient_accumulation_steps
@@ -448,6 +438,7 @@ def main():
             "seqeval_recall": eval_metrics["seqeval_recall"],
             "seqeval_f1": eval_metrics["seqeval_f1"],
             "lr": scheduler.get_last_lr()[0],
+            "train_source_counts": dict(source_counts),
             "best_so_far": False,
         }
         if row["seqeval_f1"] > best_f1:
@@ -455,7 +446,7 @@ def main():
             best_epoch = epoch
             best_metrics = dict(eval_metrics)
             row["best_so_far"] = True
-            save_model_bundle(output_dir / "best", model, processor, labels_payload, args.use_angle_features)
+            save_model_bundle(output_dir / "best", model, processor, labels_payload)
         history.append(row)
         print(
             f"Epoch {epoch:03d}/{args.epochs:03d} | train_loss={train_loss:.6f} | "
@@ -464,38 +455,40 @@ def main():
         )
 
     final_metrics = evaluate(model, eval_loader, device, id2label)
-    save_model_bundle(output_dir / "last", model, processor, labels_payload, args.use_angle_features)
-    plot_path = Path(args.plot_path) if args.plot_path else output_dir / "training_curve.png"
-    saved_plot = plot_history(plot_path, history, best_epoch)
-    config = {
-        "input_dir": args.input_dir,
-        "exclude_dir_name": args.exclude_dir_name,
-        "excluded_temp_count": len(excluded),
-        "split_by_parent": args.split_by_parent,
-        "validation_parent_count": args.validation_parent_count,
-        "validation_augmented": args.validation_augmented,
-        "max_train_samples": args.max_train_samples,
-        "max_eval_samples": args.max_eval_samples,
-        "model_name_or_path": args.model_name_or_path,
-        "output_dir": str(output_dir),
-        "epochs": args.epochs,
-        "learning_rate": args.learning_rate,
-        "weight_decay": args.weight_decay,
-        "batch_size": args.batch_size,
-        "eval_batch_size": args.eval_batch_size,
-        "gradient_accumulation_steps": args.gradient_accumulation_steps,
-        "max_length": args.max_length,
-        "fp16": use_fp16,
-        "seed": args.seed,
-        "use_angle_features": args.use_angle_features,
-        "angle_feature_dim": ANGLE_FEATURE_DIM if args.use_angle_features else 0,
-        "angle_first_subword_only": args.angle_first_subword_only,
-        "device": str(device),
-        "cuda_available": torch.cuda.is_available(),
-        "train_records": train_records,
-        "validation_records": validation_records,
-    }
-    save_json(output_dir / "training_config.json", config)
+    save_model_bundle(output_dir / "last", model, processor, labels_payload)
+    saved_plot = plot_history(Path(args.plot_path) if args.plot_path else output_dir / "training_curve.png", history, best_epoch)
+    save_json(
+        output_dir / "training_config.json",
+        {
+            "cord_bio_dir": args.cord_bio_dir,
+            "cord_raw_data_dir": args.cord_raw_data_dir,
+            "user_input_dir": args.user_input_dir,
+            "exclude_dir_name": args.exclude_dir_name,
+            "excluded_temp_count": len(excluded),
+            "model_name_or_path": args.model_name_or_path,
+            "output_dir": str(output_dir),
+            "epochs": args.epochs,
+            "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
+            "batch_size": args.batch_size,
+            "eval_batch_size": args.eval_batch_size,
+            "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "max_cord_train_samples": args.max_cord_train_samples,
+            "max_cord_eval_samples": args.max_cord_eval_samples,
+            "user_repeat": args.user_repeat,
+            "cord_train_samples": len(cord_train),
+            "cord_validation_samples": len(cord_eval),
+            "user_train_samples": len(user_train),
+            "user_validation_samples": len(user_eval),
+            "mixed_train_records_per_epoch": len(train_records),
+            "mixed_validation_records": len(eval_records),
+            "device": str(device),
+            "cuda_available": torch.cuda.is_available(),
+            "fp16": use_fp16,
+            "angle_feature_dim": ANGLE_FEATURE_DIM,
+            "angle_first_subword_only": args.angle_first_subword_only,
+        },
+    )
     save_json(output_dir / "training_history.json", {"history": history})
     save_json(output_dir / "best_metrics.json", {"best_epoch": best_epoch, "best_f1": best_f1, "metrics": best_metrics})
     save_json(output_dir / "final_metrics.json", final_metrics)
@@ -505,7 +498,7 @@ def main():
     print(f"training_curve path: {saved_plot}")
     print(f"best checkpoint: {output_dir / 'best'}")
     print(f"last checkpoint: {output_dir / 'last'}")
-    print("User LayoutLMv3 fine-tuning passed.")
+    print("Angle-aware mixed CORD + user LayoutLMv3 fine-tuning passed.")
 
 
 if __name__ == "__main__":

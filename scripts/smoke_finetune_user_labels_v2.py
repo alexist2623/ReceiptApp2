@@ -14,6 +14,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.receipt_schema import canonicalize_label
+from ml.angle_geometry import ANGLE_FEATURE_DIM, build_angle_features_for_words
+from ml.layoutlmv3_angle_inputs import encoding_with_angle_features
+from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier
 
 
 def parse_args():
@@ -30,6 +33,8 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=2)
     parser.add_argument("--learning_rate", type=float, default=5e-5)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
+    parser.add_argument("--use_angle_features", action="store_true")
+    parser.add_argument("--angle_first_subword_only", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
@@ -134,6 +139,7 @@ def load_labeled_sample(image_path, label_json_path, label2id):
     boxes = []
     normalized_boxes = []
     labels = []
+    word_payloads = []
     skipped = []
     unknown_labels = []
     for idx, item in enumerate(words_payload):
@@ -159,12 +165,20 @@ def load_labeled_sample(image_path, label_json_path, label2id):
         boxes.append(box)
         normalized_boxes.append(normalize_box(box, width, height))
         labels.append(canonical)
+        word_payloads.append(item)
 
     if unknown_labels:
         first = unknown_labels[:20]
         fail(f"Unknown labels for schema {first}. Export/update schemas/receipt_labels_v2.json first.")
     if not words:
         fail("No valid labeled words found.")
+
+    angle_features, angle_debug = build_angle_features_for_words(
+        word_payloads,
+        boxes=boxes,
+        image_width=width,
+        image_height=height,
+    )
 
     return {
         "image": image,
@@ -173,6 +187,11 @@ def load_labeled_sample(image_path, label_json_path, label2id):
         "words": words,
         "boxes": boxes,
         "normalized_boxes": normalized_boxes,
+        "word_payloads": word_payloads,
+        "angle_features": angle_features,
+        "angle_debug": angle_debug,
+        "num_words_with_angle": sum(1 for row in angle_debug if row.get("has_angle")),
+        "num_words_without_angle": sum(1 for row in angle_debug if not row.get("has_angle")),
         "labels": labels,
         "label_ids": [label2id[label] for label in labels],
         "warnings": warnings,
@@ -246,6 +265,9 @@ def main():
     print(f"image_size: {sample['width']}x{sample['height']}")
     print(f"num_words: {len(sample['words'])}")
     print(f"num_labels: {len(label_list)}")
+    print(f"angle_feature_dim: {ANGLE_FEATURE_DIM}")
+    print(f"num_words_with_angle: {sample['num_words_with_angle']}")
+    print(f"num_words_without_angle: {sample['num_words_without_angle']}")
     print(f"label_counts: {dict(Counter(sample['labels']))}")
 
     processor = AutoProcessor.from_pretrained(
@@ -253,18 +275,37 @@ def main():
         apply_ocr=False,
         local_files_only=args.local_files_only,
     )
-    model = AutoModelForTokenClassification.from_pretrained(
-        args.model_name_or_path,
-        num_labels=len(label_list),
-        id2label={idx: label for idx, label in id2label.items()},
-        label2id=label2id,
-        ignore_mismatched_sizes=True,
-        local_files_only=args.local_files_only,
-    )
+    if args.use_angle_features:
+        model = load_angle_aware_token_classifier(
+            args.model_name_or_path,
+            num_labels=len(label_list),
+            id2label={idx: label for idx, label in id2label.items()},
+            label2id=label2id,
+            ignore_mismatched_sizes=True,
+            local_files_only=args.local_files_only,
+        )
+    else:
+        model = AutoModelForTokenClassification.from_pretrained(
+            args.model_name_or_path,
+            num_labels=len(label_list),
+            id2label={idx: label for idx, label in id2label.items()},
+            label2id=label2id,
+            ignore_mismatched_sizes=True,
+            local_files_only=args.local_files_only,
+        )
     model.to(device)
     model.train()
 
-    encoding = encoding_with_labels(processor, sample, args.max_length)
+    if args.use_angle_features:
+        encoding = encoding_with_angle_features(
+            processor,
+            [sample],
+            args.max_length,
+            include_labels=True,
+            first_subword_only=args.angle_first_subword_only,
+        )
+    else:
+        encoding = encoding_with_labels(processor, sample, args.max_length)
     encoding_shapes = {key: list(value.shape) for key, value in encoding.items() if hasattr(value, "shape")}
     non_ignored_labels = int((encoding["labels"] != -100).sum().item())
     print(f"encoding_shapes: {encoding_shapes}")
@@ -277,7 +318,7 @@ def main():
     batch = {
         key: value.to(device)
         for key, value in encoding.items()
-        if key in {"input_ids", "attention_mask", "bbox", "pixel_values", "token_type_ids", "labels"}
+        if key in {"input_ids", "attention_mask", "bbox", "pixel_values", "token_type_ids", "labels", "angle_features"}
     }
     for step in range(1, args.steps + 1):
         optimizer.zero_grad(set_to_none=True)
@@ -310,6 +351,11 @@ def main():
         "cuda_device_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "num_words": len(sample["words"]),
         "num_labels": len(label_list),
+        "use_angle_features": args.use_angle_features,
+        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "num_words_with_angle": sample["num_words_with_angle"],
+        "num_words_without_angle": sample["num_words_without_angle"],
+        "angle_debug_preview": sample["angle_debug"][:50],
         "label_counts": dict(Counter(sample["labels"])),
         "encoding_shapes": encoding_shapes,
         "non_ignored_token_labels": non_ignored_labels,

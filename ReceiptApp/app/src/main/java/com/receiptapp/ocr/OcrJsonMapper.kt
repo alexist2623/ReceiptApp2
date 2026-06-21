@@ -1,6 +1,8 @@
 package com.receiptapp.ocr
 
 import android.util.Log
+import kotlin.math.PI
+import kotlin.math.atan2
 
 object OcrJsonMapper {
     private const val TAG = "ReceiptOCR"
@@ -40,6 +42,7 @@ object OcrJsonMapper {
                     }
                     val wordId = "w_${words.size.toString().padStart(6, '0')}"
                     wordIds += wordId
+                    val clampedCornerPoints = clampCornerPoints(word.cornerPoints, image.width, image.height)
                     words += OcrWordDto(
                         wordId = wordId,
                         blockId = blockId,
@@ -48,7 +51,8 @@ object OcrJsonMapper {
                         globalWordIndex = words.size,
                         text = text,
                         box = box,
-                        cornerPoints = clampCornerPoints(word.cornerPoints, image.width, image.height),
+                        cornerPoints = clampedCornerPoints,
+                        angleDeg = angleDegFromCornerPoints(clampedCornerPoints),
                         confidence = word.confidence,
                         recognizedLanguage = word.recognizedLanguage,
                     )
@@ -139,5 +143,24 @@ object OcrJsonMapper {
         return points.mapNotNull { point ->
             if (point.size < 2) null else listOf(point[0].coerceIn(0, width - 1), point[1].coerceIn(0, height - 1))
         }.takeIf { it.isNotEmpty() }
+    }
+
+    private fun angleDegFromCornerPoints(points: List<List<Int>>?): Float? {
+        if (points == null || points.size < 4) return null
+        val p0 = points[0]
+        val p1 = points[1]
+        val p2 = points[2]
+        val p3 = points[3]
+        val topDx = (p1[0] - p0[0]).toDouble()
+        val topDy = (p1[1] - p0[1]).toDouble()
+        val bottomDx = (p2[0] - p3[0]).toDouble()
+        val bottomDy = (p2[1] - p3[1]).toDouble()
+        val dx = topDx + bottomDx
+        val dy = topDy + bottomDy
+        if (dx == 0.0 && dy == 0.0) return null
+        var angle = atan2(dy, dx) * 180.0 / PI
+        while (angle <= -180.0) angle += 360.0
+        while (angle > 180.0) angle -= 360.0
+        return angle.toFloat()
     }
 }

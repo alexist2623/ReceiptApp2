@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.span_relg.cord_spans import make_gold_spans_from_cord
+from ml.angle_geometry import ANGLE_FEATURE_DIM
 from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3
 from ml.span_relg.schema import ALL_FIELDS
 
@@ -33,6 +34,8 @@ def parse_args():
     parser.add_argument("--include_context_tokens", default="all", choices=("all", "o_only", "none"))
     parser.add_argument("--span_pooling", default="first", choices=("first", "mean"))
     parser.add_argument("--group_key_strategy", default="group", choices=("group", "group_sub", "group_row"))
+    parser.add_argument("--use_angle_features", default="auto", choices=("auto", "true", "false"))
+    parser.add_argument("--disable_angle_features", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
@@ -101,6 +104,11 @@ def build_one_split(
                 layout_model,
                 device,
                 max_length=args.max_length,
+                word_angle_features=(
+                    sample_info.get("angle_features")
+                    if getattr(layout_model, "uses_angle_features", False) or args.use_angle_features == "true"
+                    else None
+                ),
             )
             cache = build_cache_sample(
                 sample_id,
@@ -115,6 +123,8 @@ def build_one_split(
             )
             cache["word_token_indices"] = word_features["word_token_indices"]
             cache["encoding_shapes"] = word_features["encoding_shapes"]
+            cache["uses_angle_features"] = word_features.get("uses_angle_features", False)
+            cache["angle_features_shape"] = word_features.get("angle_features_shape")
             if cache["candidate_pairs"].numel() == 0:
                 raise ValueError("No candidate rel-g pairs found.")
             sample_path = split_dir / f"{sample_id}.pt"
@@ -179,8 +189,22 @@ def main():
     splits = [args.split] if args.split else available
 
     print("Loading frozen LayoutLMv3 feature extractor...")
-    processor, layout_model, device = load_layoutlmv3(args.checkpoint, args.local_files_only, args.device)
+    use_angle_features = "false" if args.disable_angle_features else args.use_angle_features
+    if use_angle_features == "true":
+        use_angle_features_for_model = True
+    elif use_angle_features == "false":
+        use_angle_features_for_model = False
+    else:
+        use_angle_features_for_model = "auto"
+    processor, layout_model, device = load_layoutlmv3(
+        args.checkpoint,
+        args.local_files_only,
+        args.device,
+        use_angle_features=use_angle_features_for_model,
+    )
     print(f"selected device: {device}")
+    print(f"use_angle_features: {use_angle_features}")
+    print(f"layout_model_uses_angle_features: {getattr(layout_model, 'uses_angle_features', False)}")
     if torch.cuda.is_available():
         print(f"cuda device: {torch.cuda.get_device_name(0)}")
 
@@ -196,6 +220,8 @@ def main():
         "include_context_tokens": args.include_context_tokens,
         "span_pooling": args.span_pooling,
         "group_key_strategy": args.group_key_strategy,
+        "use_angle_features": use_angle_features,
+        "angle_feature_dim": ANGLE_FEATURE_DIM,
         "device": str(device),
         "cuda_available": torch.cuda.is_available(),
         "splits": {},
@@ -241,7 +267,10 @@ def main():
             "Pair labels are binary same-group rel-g labels, not group_id classes.",
             "Old CORD MENU_* labels are canonicalized to receipt schema v2 ITEM_* fields.",
             "No rel-s or token serialization is implemented here.",
+            "Angle-aware LayoutLMv3 checkpoints are supported; CORD-only cache uses zero angle features unless angle_features are provided by the sample builder.",
         ],
+        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "uses_angle_features": bool(getattr(layout_model, "uses_angle_features", False)),
     }
     summary["field_counts"] = dict(field_counts)
     summary["pair_field_counts"] = dict(pair_field_counts)

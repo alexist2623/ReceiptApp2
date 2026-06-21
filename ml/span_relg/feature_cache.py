@@ -1,6 +1,8 @@
 import torch
 from transformers import AutoModelForTokenClassification, AutoProcessor
 
+from ml.angle_geometry import align_angle_features_to_tokens
+from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier
 from .geometry import box1000_to_unit, pair_geometry_dim, pair_geometry_features
 from .schema import CONTEXT_FIELD, is_candidate_dep_field, is_dependent_field, is_head_field
 from ml.receipt_schema import canonicalize_field, field_for_vocab
@@ -17,24 +19,61 @@ def select_device(device="auto"):
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def load_layoutlmv3(checkpoint, local_files_only=False, device="auto"):
+def _checkpoint_looks_angle_aware(checkpoint):
+    checkpoint = str(checkpoint)
+    from pathlib import Path
+
+    path = Path(checkpoint)
+    if (path / "angle_model_config.json").exists():
+        return True
+    config_path = path / "config.json"
+    if config_path.exists():
+        try:
+            import json
+
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            return bool(payload.get("use_angle_features") or payload.get("angle_feature_dim"))
+        except Exception:
+            return False
+    return False
+
+
+def load_layoutlmv3(checkpoint, local_files_only=False, device="auto", use_angle_features=False):
     device_obj = select_device(device)
     processor = AutoProcessor.from_pretrained(
         checkpoint,
         apply_ocr=False,
         local_files_only=local_files_only,
     )
-    model = AutoModelForTokenClassification.from_pretrained(
-        checkpoint,
-        local_files_only=local_files_only,
-    )
+    use_angle = _checkpoint_looks_angle_aware(checkpoint) if use_angle_features == "auto" else bool(use_angle_features)
+    if use_angle:
+        model = load_angle_aware_token_classifier(
+            checkpoint,
+            local_files_only=local_files_only,
+            ignore_mismatched_sizes=True,
+        )
+    else:
+        model = AutoModelForTokenClassification.from_pretrained(
+            checkpoint,
+            local_files_only=local_files_only,
+        )
     model.to(device_obj)
     model.eval()
     model.requires_grad_(False)
+    model.uses_angle_features = use_angle
     return processor, model, device_obj
 
 
-def compute_word_hidden(image, words, normalized_boxes, processor, model, device, max_length=512):
+def compute_word_hidden(
+    image,
+    words,
+    normalized_boxes,
+    processor,
+    model,
+    device,
+    max_length=512,
+    word_angle_features=None,
+):
     encoding = processor(
         image,
         words,
@@ -50,6 +89,12 @@ def compute_word_hidden(image, words, normalized_boxes, processor, model, device
         for key, value in encoding.items()
         if key in {"input_ids", "attention_mask", "bbox", "pixel_values", "token_type_ids"}
     }
+    uses_angle = bool(getattr(model, "uses_angle_features", False) or word_angle_features is not None)
+    angle_shape = None
+    if uses_angle:
+        angle_tensor = align_angle_features_to_tokens(encoding, word_angle_features or [], batch_index=0)
+        model_inputs["angle_features"] = angle_tensor.unsqueeze(0).to(device)
+        angle_shape = list(model_inputs["angle_features"].shape)
     with torch.no_grad():
         outputs = model(**model_inputs, output_hidden_states=True, return_dict=True)
         if getattr(outputs, "hidden_states", None):
@@ -75,6 +120,8 @@ def compute_word_hidden(image, words, normalized_boxes, processor, model, device
         "word_hidden": word_hidden,
         "word_token_indices": token_indices,
         "encoding_shapes": {key: list(value.shape) for key, value in encoding.items() if hasattr(value, "shape")},
+        "uses_angle_features": uses_angle,
+        "angle_features_shape": angle_shape,
     }
 
 

@@ -6,6 +6,7 @@ from PIL import Image
 
 from .geometry import clamp_box, normalize_box_1000, union_boxes
 from .schema import category_to_field, is_candidate_dep_field, is_head_field
+from ml.angle_geometry import build_angle_features_for_words
 
 
 def parse_ground_truth(gt) -> dict:
@@ -93,6 +94,7 @@ def extract_cord_words_and_lines(sample) -> dict:
         raise ValueError("ground_truth.valid_line not found")
 
     words = []
+    word_payloads = []
     boxes = []
     normalized_boxes = []
     lines = []
@@ -106,6 +108,7 @@ def extract_cord_words_and_lines(sample) -> dict:
                 continue
             word_indices.append(len(words))
             words.append(text)
+            word_payloads.append(word if isinstance(word, dict) else {})
             boxes.append(box)
             normalized_boxes.append(normalize_box_1000(box, width, height))
         if not word_indices:
@@ -128,13 +131,25 @@ def extract_cord_words_and_lines(sample) -> dict:
             }
         )
 
+    angle_features, angle_debug = build_angle_features_for_words(
+        word_payloads,
+        boxes=boxes,
+        image_width=width,
+        image_height=height,
+    )
+
     return {
         "image": image,
         "width": width,
         "height": height,
         "words": words,
+        "word_payloads": word_payloads,
         "boxes": boxes,
         "normalized_boxes": normalized_boxes,
+        "angle_features": angle_features,
+        "angle_debug": angle_debug,
+        "num_words_with_angle": sum(1 for row in angle_debug if row.get("has_angle")),
+        "num_words_without_angle": sum(1 for row in angle_debug if not row.get("has_angle")),
         "lines": lines,
     }
 
@@ -178,4 +193,3 @@ def make_gold_spans_from_cord(sample, group_key_strategy="group") -> dict:
         spans.append(span)
     extracted["spans"] = spans
     return extracted
-

@@ -99,6 +99,7 @@ data class OcrWordDto(
     val text: String,
     val box: List<Int>,
     val cornerPoints: List<List<Int>>? = null,
+    val angleDeg: Float? = null,
     val confidence: Float? = null,
     val recognizedLanguage: String? = null,
 )
