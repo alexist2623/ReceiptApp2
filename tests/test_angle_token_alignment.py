@@ -39,3 +39,13 @@ def test_align_angle_features_first_subword_only():
     assert aligned[1].tolist() == word_features[0]
     assert aligned[2].sum().item() == 0.0
     assert aligned[3].tolist() == word_features[1]
+
+
+def test_align_angle_features_direct_word_ids_form():
+    word_features = [[1.0, 0.0], [0.0, 1.0]]
+    word_ids = [None, 0, 0, 1, None]
+    aligned = align_angle_features_to_tokens(word_features, word_ids, max_length=5, feature_dim=2)
+    assert aligned.shape == (5, 2)
+    assert aligned[1].tolist() == word_features[0]
+    assert aligned[2].tolist() == word_features[0]
+    assert aligned[3].tolist() == word_features[1]

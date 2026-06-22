@@ -2,10 +2,14 @@ import math
 
 from ml.angle_geometry import (
     ANGLE_FEATURE_DIM,
+    ANGLE_QUAD_FEATURE_DIM,
+    angle_feature_dim_for_mode,
     angle_deg_from_quad,
     build_word_angle_features,
     normalize_angle_deg,
     parse_quad,
+    relative_quad_features,
+    rotate_points,
     quad_to_axis_aligned_box,
 )
 
@@ -24,8 +28,9 @@ def test_angle_deg_from_slightly_rotated_quad():
 
 
 def test_normalize_angle_wraps_to_signed_range():
-    assert normalize_angle_deg(190) == -170
-    assert normalize_angle_deg(-190) == 170
+    assert normalize_angle_deg(91) == -89
+    assert normalize_angle_deg(-91) == 89
+    assert normalize_angle_deg(180) == 0
 
 
 def test_missing_angle_features_are_zero():
@@ -44,3 +49,27 @@ def test_explicit_angle_features_include_has_angle():
     assert len(features) == ANGLE_FEATURE_DIM
     assert features[4] == 1.0
     assert debug["angle_deg"] == 12.0
+
+
+def test_angle_quad_mode_has_expected_dim():
+    features, debug = build_word_angle_features(
+        {"text": "abc", "quad": [0, 0, 20, 4, 18, 14, -2, 10], "angle_deg": 10.0},
+        box=[0, 0, 20, 14],
+        image_width=100,
+        image_height=100,
+        mode="angle_quad",
+    )
+    assert len(features) == ANGLE_QUAD_FEATURE_DIM
+    assert angle_feature_dim_for_mode("angle_quad") == ANGLE_QUAD_FEATURE_DIM
+    assert debug["has_quad"] is True
+
+
+def test_relative_quad_features_are_eight_values():
+    features = relative_quad_features([0, 0, 20, 4, 18, 14, -2, 10], [0, 0, 20, 14])
+    assert len(features) == 8
+
+
+def test_rotate_points_changes_canvas_with_expand():
+    points = rotate_points([(0, 0), (100, 0), (100, 50), (0, 50)], 100, 50, 10)
+    assert len(points) == 4
+    assert min(x for x, _ in points) >= -1e-6

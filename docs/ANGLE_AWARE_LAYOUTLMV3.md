@@ -16,18 +16,27 @@ Standard LayoutLMv3 inputs:
 
 Angle-aware inputs add:
 
-- `angle_features`: `[batch, max_length, 9]`
+- `angle_features`: `[batch, max_length, dim]`
 
 The `bbox` tensor still uses axis-aligned 0..1000 boxes. The angle feature is
 derived from OCR `cornerPoints`, `quad`, `vertices`, or explicit `angleDeg`.
 If no angle information exists, the angle feature row is all zeros.
+
+Supported feature modes:
+
+- `sincos_scalar`: backward-compatible 9-dim feature vector
+- `angle_quad`: 18-dim feature vector with angle, relative quad, area, and presence flags
+- `relative_quad`, `sincos`, `raw_scalar`, `none`: lightweight alternatives
+
+The recommended new mixed training path uses `angle_quad`.
 
 ## Feature Modules
 
 - `ml/angle_geometry.py`
   - parses quadrilaterals and OCR corner points
   - computes word text angle
-  - creates the 9-dim word feature vector
+  - creates configurable word feature vectors
+  - rotates images and quadrilateral boxes for WildReceipt augmentation
   - aligns word features to token positions
 
 - `ml/layoutlmv3_angle_inputs.py`
@@ -87,13 +96,17 @@ python scripts/smoke_angle_aware_layoutlmv3.py \
 Use the angle-specific script rather than replacing the existing mixed trainer:
 
 ```bash
-python scripts/train_mixed_layoutlmv3_angle_user_cord.py \
+python scripts/train_mixed_layoutlmv3_angle_public_user.py \
   --cord_bio_dir processed_data/cord_bio \
   --cord_raw_data_dir ../receipt_training_data2 \
+  --wildreceipt_bio_dir processed_data/wildreceipt_rotated_receipt_v2_bio \
   --user_input_dir path/to/user_labels \
   --model_name_or_path models/layoutlmv3-cord-full/best \
   --local_files_only \
-  --output_dir models/layoutlmv3-angle-mixed-cord-user-non-temp \
+  --output_dir models/layoutlmv3-angle-mixed-public-user \
+  --sources cord,wild,user \
+  --angle_encoding_mode angle_quad \
+  --angle_feature_dim 18 \
   --epochs 100 \
   --batch_size 2 \
   --device cuda \

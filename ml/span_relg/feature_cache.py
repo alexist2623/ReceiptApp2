@@ -1,7 +1,10 @@
+import json
+from pathlib import Path
+
 import torch
 from transformers import AutoModelForTokenClassification, AutoProcessor
 
-from ml.angle_geometry import align_angle_features_to_tokens
+from ml.angle_geometry import align_angle_features_to_tokens, angle_feature_dim_for_mode
 from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier
 from .geometry import box1000_to_unit, pair_geometry_dim, pair_geometry_features
 from .schema import CONTEXT_FIELD, is_candidate_dep_field, is_dependent_field, is_head_field
@@ -38,6 +41,37 @@ def _checkpoint_looks_angle_aware(checkpoint):
     return False
 
 
+def _load_angle_config(checkpoint):
+    path = Path(checkpoint)
+    for name in ("angle_model_config.json", "config.json"):
+        config_path = path / name
+        if not config_path.exists():
+            continue
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if payload.get("use_angle_features") or payload.get("angle_feature_dim") or payload.get("angle_encoding_mode"):
+            mode = payload.get("angle_encoding_mode", "sincos_scalar")
+            dim = int(payload.get("angle_feature_dim", angle_feature_dim_for_mode(mode)))
+            return {
+                "source": str(config_path),
+                "use_angle_features": True,
+                "angle_encoding_mode": mode,
+                "angle_feature_dim": dim,
+                "angle_hidden_size": payload.get("angle_hidden_size", payload.get("angle_hidden_dim")),
+                "angle_fusion": payload.get("angle_fusion", "add"),
+            }
+    return {
+        "source": None,
+        "use_angle_features": False,
+        "angle_encoding_mode": "none",
+        "angle_feature_dim": 0,
+        "angle_hidden_size": None,
+        "angle_fusion": "add",
+    }
+
+
 def load_layoutlmv3(checkpoint, local_files_only=False, device="auto", use_angle_features=False):
     device_obj = select_device(device)
     processor = AutoProcessor.from_pretrained(
@@ -45,12 +79,15 @@ def load_layoutlmv3(checkpoint, local_files_only=False, device="auto", use_angle
         apply_ocr=False,
         local_files_only=local_files_only,
     )
+    angle_config = _load_angle_config(checkpoint)
     use_angle = _checkpoint_looks_angle_aware(checkpoint) if use_angle_features == "auto" else bool(use_angle_features)
     if use_angle:
         model = load_angle_aware_token_classifier(
             checkpoint,
             local_files_only=local_files_only,
             ignore_mismatched_sizes=True,
+            angle_feature_dim=angle_config.get("angle_feature_dim") or None,
+            angle_encoding_mode=angle_config.get("angle_encoding_mode") or None,
         )
     else:
         model = AutoModelForTokenClassification.from_pretrained(
@@ -61,7 +98,22 @@ def load_layoutlmv3(checkpoint, local_files_only=False, device="auto", use_angle
     model.eval()
     model.requires_grad_(False)
     model.uses_angle_features = use_angle
+    model.angle_feature_config = angle_config if use_angle else {"use_angle_features": False, "angle_feature_dim": 0}
     return processor, model, device_obj
+
+
+def load_layoutlmv3_for_feature_cache(checkpoint, local_files_only=False, device="auto"):
+    angle_config = _load_angle_config(checkpoint)
+    processor, model, device_obj = load_layoutlmv3(
+        checkpoint,
+        local_files_only=local_files_only,
+        device=device,
+        use_angle_features="auto",
+    )
+    uses_angle = bool(getattr(model, "uses_angle_features", False))
+    if uses_angle and not angle_config.get("use_angle_features"):
+        angle_config = getattr(model, "angle_feature_config", angle_config)
+    return processor, model, device_obj, uses_angle, angle_config
 
 
 def compute_word_hidden(
@@ -73,6 +125,8 @@ def compute_word_hidden(
     device,
     max_length=512,
     word_angle_features=None,
+    uses_angle_features=None,
+    angle_feature_dim=None,
 ):
     encoding = processor(
         image,
@@ -89,10 +143,21 @@ def compute_word_hidden(
         for key, value in encoding.items()
         if key in {"input_ids", "attention_mask", "bbox", "pixel_values", "token_type_ids"}
     }
-    uses_angle = bool(getattr(model, "uses_angle_features", False) or word_angle_features is not None)
+    uses_angle = bool(
+        uses_angle_features
+        if uses_angle_features is not None
+        else getattr(model, "uses_angle_features", False) or word_angle_features is not None
+    )
+    if angle_feature_dim is None:
+        angle_feature_dim = int(getattr(model, "angle_feature_config", {}).get("angle_feature_dim") or getattr(model.config, "angle_feature_dim", 0) or 0)
     angle_shape = None
     if uses_angle:
-        angle_tensor = align_angle_features_to_tokens(encoding, word_angle_features or [], batch_index=0)
+        angle_tensor = align_angle_features_to_tokens(
+            encoding,
+            word_angle_features or [],
+            batch_index=0,
+            feature_dim=angle_feature_dim or None,
+        )
         model_inputs["angle_features"] = angle_tensor.unsqueeze(0).to(device)
         angle_shape = list(model_inputs["angle_features"].shape)
     with torch.no_grad():
@@ -122,6 +187,7 @@ def compute_word_hidden(
         "encoding_shapes": {key: list(value.shape) for key, value in encoding.items() if hasattr(value, "shape")},
         "uses_angle_features": uses_angle,
         "angle_features_shape": angle_shape,
+        "angle_feature_shape": angle_shape,
     }
 
 

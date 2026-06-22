@@ -14,8 +14,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.span_relg.cord_spans import make_gold_spans_from_cord
-from ml.angle_geometry import ANGLE_FEATURE_DIM
-from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3
+from ml.angle_geometry import ANGLE_FEATURE_DIM, angle_feature_dim_for_mode, build_angle_features_for_words
+from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3_for_feature_cache
 from ml.span_relg.schema import ALL_FIELDS
 
 
@@ -78,6 +78,7 @@ def build_one_split(
     args,
     field2id,
     kind2id,
+    angle_config,
 ):
     split_dir = out_dir / split
     split_dir.mkdir(parents=True, exist_ok=True)
@@ -96,6 +97,21 @@ def build_one_split(
                 dataset[split][index],
                 group_key_strategy=args.group_key_strategy,
             )
+            if bool(getattr(layout_model, "uses_angle_features", False)):
+                mode = angle_config.get("angle_encoding_mode") or "sincos_scalar"
+                dim = int(angle_config.get("angle_feature_dim") or angle_feature_dim_for_mode(mode))
+                existing = sample_info.get("angle_features") or []
+                existing_dim = len(existing[0]) if existing else 0
+                if existing_dim != dim:
+                    angle_result = build_angle_features_for_words(
+                        sample_info.get("word_payloads") or [],
+                        boxes=sample_info.get("boxes") or [],
+                        image_width=sample_info.get("width"),
+                        image_height=sample_info.get("height"),
+                        mode=mode,
+                    )
+                    sample_info["angle_features"] = angle_result["angle_features"]
+                    sample_info["angle_debug"] = angle_result["word_angles"]
             word_features = compute_word_hidden(
                 sample_info["image"],
                 sample_info["words"],
@@ -109,6 +125,8 @@ def build_one_split(
                     if getattr(layout_model, "uses_angle_features", False) or args.use_angle_features == "true"
                     else None
                 ),
+                uses_angle_features=bool(getattr(layout_model, "uses_angle_features", False)),
+                angle_feature_dim=int(angle_config.get("angle_feature_dim") or 0),
             )
             cache = build_cache_sample(
                 sample_id,
@@ -196,12 +214,17 @@ def main():
         use_angle_features_for_model = False
     else:
         use_angle_features_for_model = "auto"
-    processor, layout_model, device = load_layoutlmv3(
+    processor, layout_model, device, layout_uses_angle, angle_config = load_layoutlmv3_for_feature_cache(
         args.checkpoint,
         args.local_files_only,
         args.device,
-        use_angle_features=use_angle_features_for_model,
     )
+    if use_angle_features_for_model is False:
+        layout_model.uses_angle_features = False
+        layout_uses_angle = False
+        angle_config = {"use_angle_features": False, "angle_feature_dim": 0, "angle_encoding_mode": "none"}
+    elif use_angle_features_for_model is True and not layout_uses_angle:
+        print("WARNING: --use_angle_features true was requested, but checkpoint is not angle-aware.")
     print(f"selected device: {device}")
     print(f"use_angle_features: {use_angle_features}")
     print(f"layout_model_uses_angle_features: {getattr(layout_model, 'uses_angle_features', False)}")
@@ -221,7 +244,9 @@ def main():
         "span_pooling": args.span_pooling,
         "group_key_strategy": args.group_key_strategy,
         "use_angle_features": use_angle_features,
-        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "angle_feature_dim": int(angle_config.get("angle_feature_dim") or ANGLE_FEATURE_DIM),
+        "angle_encoding_mode": angle_config.get("angle_encoding_mode", "sincos_scalar"),
+        "angle_config": angle_config,
         "device": str(device),
         "cuda_available": torch.cuda.is_available(),
         "splits": {},
@@ -234,7 +259,7 @@ def main():
     hidden_dim = None
 
     for split in splits:
-        result = build_one_split(dataset, split, out_dir, processor, layout_model, device, args, field2id, kind2id)
+        result = build_one_split(dataset, split, out_dir, processor, layout_model, device, args, field2id, kind2id, angle_config)
         manifest["splits"][split] = result["records"]
         manifest["records"].extend(result["records"])
         summary["splits"][split] = result["summary"]
@@ -269,7 +294,9 @@ def main():
             "No rel-s or token serialization is implemented here.",
             "Angle-aware LayoutLMv3 checkpoints are supported; CORD-only cache uses zero angle features unless angle_features are provided by the sample builder.",
         ],
-        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "angle_feature_dim": int(angle_config.get("angle_feature_dim") or ANGLE_FEATURE_DIM),
+        "angle_encoding_mode": angle_config.get("angle_encoding_mode", "sincos_scalar"),
+        "angle_config": angle_config,
         "uses_angle_features": bool(getattr(layout_model, "uses_angle_features", False)),
     }
     summary["field_counts"] = dict(field_counts)

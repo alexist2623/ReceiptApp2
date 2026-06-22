@@ -14,7 +14,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from ml.angle_geometry import ANGLE_FEATURE_DIM, align_angle_features_to_tokens
+from ml.angle_geometry import (
+    ANGLE_FEATURE_DIM,
+    align_angle_features_to_tokens,
+    angle_feature_dim_for_mode,
+    build_angle_features_for_words,
+)
 from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier
 from ml.span_relg.cord_spans import extract_cord_words_and_lines
 from ml.span_relg.decode import decode_edges_to_items
@@ -104,18 +109,41 @@ def checkpoint_looks_angle_aware(checkpoint):
     return False
 
 
+def load_angle_config(checkpoint):
+    checkpoint = Path(checkpoint)
+    for name in ("angle_model_config.json", "config.json"):
+        path = checkpoint / name
+        if not path.exists():
+            continue
+        try:
+            payload = load_json(path)
+        except Exception:
+            continue
+        if payload.get("use_angle_features") or payload.get("angle_feature_dim") or payload.get("angle_encoding_mode"):
+            mode = payload.get("angle_encoding_mode", "sincos_scalar")
+            return {
+                "source": str(path),
+                "angle_encoding_mode": mode,
+                "angle_feature_dim": int(payload.get("angle_feature_dim", angle_feature_dim_for_mode(mode))),
+            }
+    return {"source": None, "angle_encoding_mode": "none", "angle_feature_dim": 0}
+
+
 def load_layoutlmv3(checkpoint, local_files_only, device, use_angle_features="auto"):
     processor = AutoProcessor.from_pretrained(
         checkpoint,
         apply_ocr=False,
         local_files_only=local_files_only,
     )
+    angle_config = load_angle_config(checkpoint)
     use_angle = checkpoint_looks_angle_aware(checkpoint) if use_angle_features == "auto" else use_angle_features == "true"
     if use_angle:
         model = load_angle_aware_token_classifier(
             checkpoint,
             local_files_only=local_files_only,
             ignore_mismatched_sizes=True,
+            angle_feature_dim=angle_config.get("angle_feature_dim") or None,
+            angle_encoding_mode=angle_config.get("angle_encoding_mode") or None,
         )
     else:
         model = AutoModelForTokenClassification.from_pretrained(
@@ -129,6 +157,7 @@ def load_layoutlmv3(checkpoint, local_files_only, device, use_angle_features="au
     model.eval()
     model.requires_grad_(False)
     model.uses_angle_features = use_angle
+    model.angle_feature_config = angle_config if use_angle else {"angle_feature_dim": 0, "angle_encoding_mode": "none"}
     return processor, model, label2id, id2label, label_source
 
 
@@ -192,7 +221,13 @@ def run_layout_prediction(image, words, boxes, processor, model, device, id2labe
         if key in {"input_ids", "attention_mask", "bbox", "pixel_values", "token_type_ids"}
     }
     if getattr(model, "uses_angle_features", False) or angle_features is not None:
-        token_angle = align_angle_features_to_tokens(encoding, angle_features or [], batch_index=0)
+        angle_feature_dim = int(getattr(model, "angle_feature_config", {}).get("angle_feature_dim") or ANGLE_FEATURE_DIM)
+        token_angle = align_angle_features_to_tokens(
+            encoding,
+            angle_features or [],
+            batch_index=0,
+            feature_dim=angle_feature_dim,
+        )
         model_inputs["angle_features"] = token_angle.unsqueeze(0).to(device)
     with torch.no_grad():
         outputs = model(**model_inputs, output_hidden_states=True, return_dict=True)
@@ -653,6 +688,22 @@ def main():
             try:
                 raw_sample = raw_dataset[args.split][index]
                 extracted = extract_cord_words_and_lines(raw_sample)
+                if getattr(layout_model, "uses_angle_features", False):
+                    angle_config = getattr(layout_model, "angle_feature_config", {})
+                    angle_mode = angle_config.get("angle_encoding_mode") or "sincos_scalar"
+                    angle_dim = int(angle_config.get("angle_feature_dim") or angle_feature_dim_for_mode(angle_mode))
+                    existing = extracted.get("angle_features") or []
+                    existing_dim = len(existing[0]) if existing else 0
+                    if existing_dim != angle_dim:
+                        angle_result = build_angle_features_for_words(
+                            extracted.get("word_payloads") or [],
+                            boxes=extracted.get("boxes") or [],
+                            image_width=extracted.get("width"),
+                            image_height=extracted.get("height"),
+                            mode=angle_mode,
+                        )
+                        extracted["angle_features"] = angle_result["angle_features"]
+                        extracted["angle_debug"] = angle_result["word_angles"]
                 gold_labels = make_gold_word_labels(extracted)
                 layout = run_layout_prediction(
                     extracted["image"],

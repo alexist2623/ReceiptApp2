@@ -14,9 +14,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.bio_repair import repair_bio_boundaries
-from ml.angle_geometry import ANGLE_FEATURE_DIM, build_angle_features_for_words
+from ml.angle_geometry import ANGLE_FEATURE_DIM, angle_feature_dim_for_mode, build_angle_features_for_words
 from ml.receipt_schema import canonicalize_field
-from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3
+from ml.span_relg.feature_cache import build_cache_sample, compute_word_hidden, load_layoutlmv3_for_feature_cache
 from ml.span_relg.schema import ALL_FIELDS, DEP_FIELDS, HEAD_FIELDS, is_dependent_field, is_head_field
 from ml.span_relg.span_utils import bio_predictions_to_spans
 from scripts.smoke_finetune_user_labels_v2 import clamp_box, load_json, normalize_box, parse_box
@@ -392,12 +392,17 @@ def main():
         use_angle_features_for_model = False
     else:
         use_angle_features_for_model = "auto"
-    processor, layout_model, device = load_layoutlmv3(
+    processor, layout_model, device, layout_uses_angle, angle_config = load_layoutlmv3_for_feature_cache(
         args.layout_checkpoint,
         args.local_files_only,
         args.device,
-        use_angle_features=use_angle_features_for_model,
     )
+    if use_angle_features_for_model is False:
+        layout_model.uses_angle_features = False
+        layout_uses_angle = False
+        angle_config = {"use_angle_features": False, "angle_feature_dim": 0, "angle_encoding_mode": "none"}
+    elif use_angle_features_for_model is True and not layout_uses_angle:
+        print("WARNING: --use_angle_features true was requested, but checkpoint is not angle-aware.")
     print(f"selected device: {device}")
     print(f"use_angle_features: {use_angle_features}")
     print(f"layout_model_uses_angle_features: {getattr(layout_model, 'uses_angle_features', False)}")
@@ -416,7 +421,9 @@ def main():
         "include_context_tokens": args.include_context_tokens,
         "span_pooling": args.span_pooling,
         "use_angle_features": use_angle_features,
-        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "angle_feature_dim": int(angle_config.get("angle_feature_dim") or ANGLE_FEATURE_DIM),
+        "angle_encoding_mode": angle_config.get("angle_encoding_mode", "sincos_scalar"),
+        "angle_config": angle_config,
         "split_manifest": args.split_manifest,
         "repair_bio_boundaries": args.repair_bio_boundaries,
         "splits": {},
@@ -438,6 +445,23 @@ def main():
             data_id = record["id"]
             try:
                 sample_info = make_sample_info(record, repair_labels=args.repair_bio_boundaries)
+                if bool(getattr(layout_model, "uses_angle_features", False)):
+                    mode = angle_config.get("angle_encoding_mode") or "sincos_scalar"
+                    dim = int(angle_config.get("angle_feature_dim") or angle_feature_dim_for_mode(mode))
+                    existing = sample_info.get("angle_features") or []
+                    existing_dim = len(existing[0]) if existing else 0
+                    if existing_dim != dim:
+                        angle_result = build_angle_features_for_words(
+                            sample_info.get("word_payloads") or [],
+                            boxes=sample_info.get("boxes") or [],
+                            image_width=sample_info.get("width"),
+                            image_height=sample_info.get("height"),
+                            mode=mode,
+                        )
+                        sample_info["angle_features"] = angle_result["angle_features"]
+                        sample_info["angle_debug"] = angle_result["word_angles"]
+                        sample_info["num_words_with_angle"] = angle_result["num_words_with_angle"]
+                        sample_info["num_words_without_angle"] = len(sample_info["angle_features"]) - angle_result["num_words_with_angle"]
                 word_features = compute_word_hidden(
                     sample_info["image"],
                     sample_info["words"],
@@ -451,6 +475,8 @@ def main():
                         if getattr(layout_model, "uses_angle_features", False) or use_angle_features == "true"
                         else None
                     ),
+                    uses_angle_features=bool(getattr(layout_model, "uses_angle_features", False)),
+                    angle_feature_dim=int(angle_config.get("angle_feature_dim") or 0),
                 )
                 cache = build_cache_sample(
                     data_id,
@@ -527,7 +553,9 @@ def main():
             "Optional BIO boundary repair can be enabled with --repair_bio_boundaries.",
             "Optional angle-aware LayoutLMv3 hidden states can be enabled with --use_angle_features true/auto.",
         ],
-        "angle_feature_dim": ANGLE_FEATURE_DIM,
+        "angle_feature_dim": int(angle_config.get("angle_feature_dim") or ANGLE_FEATURE_DIM),
+        "angle_encoding_mode": angle_config.get("angle_encoding_mode", "sincos_scalar"),
+        "angle_config": angle_config,
         "uses_angle_features": bool(getattr(layout_model, "uses_angle_features", False)),
     }
     summary["field_counts"] = dict(field_counts)

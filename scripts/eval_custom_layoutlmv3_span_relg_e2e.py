@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.bio_repair import repair_bio_boundaries
+from ml.angle_geometry import build_angle_features_for_words, angle_feature_dim_for_mode
 from ml.metrics.field_metrics import compute_field_metrics
 from ml.receipt_schema import canonicalize_field, canonicalize_label
 from ml.span_relg.decode import decode_edges_to_items
@@ -320,6 +321,22 @@ def main():
             data_id = record["id"]
             try:
                 gold_sample = make_sample_info(record, repair_labels=args.repair_bio_boundaries)
+                if getattr(layout_model, "uses_angle_features", False):
+                    angle_config = getattr(layout_model, "angle_feature_config", {})
+                    angle_mode = angle_config.get("angle_encoding_mode") or "sincos_scalar"
+                    angle_dim = int(angle_config.get("angle_feature_dim") or angle_feature_dim_for_mode(angle_mode))
+                    existing = gold_sample.get("angle_features") or []
+                    existing_dim = len(existing[0]) if existing else 0
+                    if existing_dim != angle_dim:
+                        angle_result = build_angle_features_for_words(
+                            gold_sample.get("word_payloads") or [],
+                            boxes=gold_sample.get("boxes") or [],
+                            image_width=gold_sample.get("width"),
+                            image_height=gold_sample.get("height"),
+                            mode=angle_mode,
+                        )
+                        gold_sample["angle_features"] = angle_result["angle_features"]
+                        gold_sample["angle_debug"] = angle_result["word_angles"]
                 payload = load_json(record["label_json"])
                 layout = run_layout_prediction(
                     gold_sample["image"],
@@ -330,6 +347,11 @@ def main():
                     device,
                     id2label,
                     args.max_length,
+                    angle_features=(
+                        gold_sample.get("angle_features")
+                        if getattr(layout_model, "uses_angle_features", False)
+                        else None
+                    ),
                 )
                 predictions = attach_boxes_to_predictions(layout["predictions"], gold_sample["boxes"], gold_sample["normalized_boxes"])
                 canonicalize_prediction_labels(predictions)
@@ -362,6 +384,7 @@ def main():
                     "words": gold_sample["words"],
                     "boxes": gold_sample["boxes"],
                     "normalized_boxes": gold_sample["normalized_boxes"],
+                    "angle_features": gold_sample.get("angle_features"),
                     "predictions": predictions,
                     "spans": filtered_spans,
                 }

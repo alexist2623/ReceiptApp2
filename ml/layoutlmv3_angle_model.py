@@ -19,7 +19,7 @@ from transformers import AutoConfig, AutoProcessor
 from transformers.modeling_outputs import TokenClassifierOutput
 from transformers.models.layoutlmv3.modeling_layoutlmv3 import LayoutLMv3Model, LayoutLMv3PreTrainedModel
 
-from ml.angle_geometry import ANGLE_FEATURE_DIM
+from ml.angle_geometry import ANGLE_FEATURE_DIM, angle_feature_dim_for_mode, normalize_angle_encoding_mode
 
 
 class AngleFeatureEncoder(nn.Module):
@@ -48,10 +48,19 @@ class AngleAwareLayoutLMv3ForTokenClassification(LayoutLMv3PreTrainedModel):
             if getattr(config, "classifier_dropout", None) is not None
             else getattr(config, "hidden_dropout_prob", 0.1)
         )
-        angle_feature_dim = int(getattr(config, "angle_feature_dim", ANGLE_FEATURE_DIM))
-        angle_hidden_dim = int(getattr(config, "angle_hidden_dim", config.hidden_size))
+        angle_encoding_mode = normalize_angle_encoding_mode(getattr(config, "angle_encoding_mode", "sincos_scalar"))
+        angle_feature_dim = int(getattr(config, "angle_feature_dim", angle_feature_dim_for_mode(angle_encoding_mode)))
+        angle_hidden_dim = int(
+            getattr(config, "angle_hidden_size", getattr(config, "angle_hidden_dim", config.hidden_size))
+        )
         angle_dropout = float(getattr(config, "angle_dropout", classifier_dropout))
+        angle_fusion = str(getattr(config, "angle_fusion", "add"))
+        if angle_fusion != "add":
+            raise NotImplementedError("Only angle_fusion='add' is implemented for the current LayoutLMv3 wrapper.")
+        self.angle_encoding_mode = angle_encoding_mode
         self.angle_feature_dim = angle_feature_dim
+        self.angle_hidden_size = angle_hidden_dim
+        self.angle_fusion = angle_fusion
         self.angle_encoder = nn.Sequential(
             nn.Linear(angle_feature_dim, angle_hidden_dim),
             nn.GELU(),
@@ -127,6 +136,11 @@ def _config_with_angle(
     id2label: dict[int, str] | None = None,
     label2id: dict[str, int] | None = None,
     local_files_only: bool = False,
+    angle_feature_dim: int | None = None,
+    angle_hidden_size: int | None = None,
+    angle_dropout: float | None = None,
+    angle_fusion: str = "add",
+    angle_encoding_mode: str | None = None,
 ) -> Any:
     kwargs: dict[str, Any] = {"local_files_only": local_files_only}
     if num_labels is not None:
@@ -136,10 +150,21 @@ def _config_with_angle(
     if label2id is not None:
         kwargs["label2id"] = label2id
     config = AutoConfig.from_pretrained(model_name_or_path, **kwargs)
+    mode = normalize_angle_encoding_mode(angle_encoding_mode or getattr(config, "angle_encoding_mode", "sincos_scalar"))
     config.use_angle_features = True
-    config.angle_feature_dim = int(getattr(config, "angle_feature_dim", ANGLE_FEATURE_DIM))
-    config.angle_hidden_dim = int(getattr(config, "angle_hidden_dim", config.hidden_size))
-    config.angle_dropout = float(getattr(config, "angle_dropout", getattr(config, "hidden_dropout_prob", 0.1)))
+    config.angle_encoding_mode = mode
+    config.angle_feature_dim = int(angle_feature_dim or getattr(config, "angle_feature_dim", angle_feature_dim_for_mode(mode)))
+    config.angle_hidden_size = int(
+        angle_hidden_size
+        or getattr(config, "angle_hidden_size", getattr(config, "angle_hidden_dim", config.hidden_size))
+    )
+    config.angle_hidden_dim = config.angle_hidden_size
+    config.angle_dropout = float(
+        angle_dropout
+        if angle_dropout is not None
+        else getattr(config, "angle_dropout", getattr(config, "hidden_dropout_prob", 0.1))
+    )
+    config.angle_fusion = angle_fusion
     config.architectures = ["AngleAwareLayoutLMv3ForTokenClassification"]
     return config
 
@@ -152,6 +177,11 @@ def load_angle_aware_token_classifier(
     label2id: dict[str, int] | None = None,
     local_files_only: bool = False,
     ignore_mismatched_sizes: bool = True,
+    angle_feature_dim: int | None = None,
+    angle_hidden_size: int | None = None,
+    angle_dropout: float | None = None,
+    angle_fusion: str = "add",
+    angle_encoding_mode: str | None = None,
 ) -> AngleAwareLayoutLMv3ForTokenClassification:
     """Load an angle-aware classifier from a normal or angle-aware checkpoint."""
 
@@ -161,6 +191,11 @@ def load_angle_aware_token_classifier(
         id2label=id2label,
         label2id=label2id,
         local_files_only=local_files_only,
+        angle_feature_dim=angle_feature_dim,
+        angle_hidden_size=angle_hidden_size,
+        angle_dropout=angle_dropout,
+        angle_fusion=angle_fusion,
+        angle_encoding_mode=angle_encoding_mode,
     )
     return AngleAwareLayoutLMv3ForTokenClassification.from_pretrained(
         model_name_or_path,
@@ -184,8 +219,15 @@ def save_angle_aware_model_bundle(path: str | Path, model, processor=None, label
             {
                 "use_angle_features": True,
                 "angle_feature_dim": int(getattr(model.config, "angle_feature_dim", ANGLE_FEATURE_DIM)),
-                "angle_hidden_dim": int(getattr(model.config, "angle_hidden_dim", model.config.hidden_size)),
+                "angle_hidden_size": int(
+                    getattr(model.config, "angle_hidden_size", getattr(model.config, "angle_hidden_dim", model.config.hidden_size))
+                ),
+                "angle_hidden_dim": int(
+                    getattr(model.config, "angle_hidden_size", getattr(model.config, "angle_hidden_dim", model.config.hidden_size))
+                ),
                 "angle_dropout": float(getattr(model.config, "angle_dropout", 0.1)),
+                "angle_encoding_mode": str(getattr(model.config, "angle_encoding_mode", "sincos_scalar")),
+                "angle_fusion": str(getattr(model.config, "angle_fusion", "add")),
                 "note": "Optional token-aligned angle_features are added after LayoutLMv3 backbone sequence output.",
             },
             handle,

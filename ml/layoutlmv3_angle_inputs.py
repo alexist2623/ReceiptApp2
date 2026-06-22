@@ -9,7 +9,9 @@ import torch
 from ml.angle_geometry import (
     ANGLE_FEATURE_DIM,
     align_batch_angle_features_to_tokens,
+    angle_feature_dim_for_mode,
     build_angle_features_for_words,
+    normalize_angle_encoding_mode,
 )
 from ml.layoutlmv3_training import apply_word_ignores_to_encoding
 
@@ -19,26 +21,53 @@ def extract_word_payloads_from_label_json(payload: dict[str, Any]) -> list[dict[
     return list(words) if isinstance(words, list) else []
 
 
-def build_sample_angle_features(sample: dict[str, Any]) -> dict[str, Any]:
+def build_sample_angle_features(
+    sample: dict[str, Any],
+    *,
+    angle_encoding_mode: str | None = "sincos_scalar",
+    angle_feature_dim: int | None = None,
+    max_abs_angle_deg: float = 45.0,
+) -> dict[str, Any]:
     """Attach ``angle_features`` and debug stats to a sample dict."""
 
-    if sample.get("angle_features") is not None:
-        return sample
+    mode = normalize_angle_encoding_mode(angle_encoding_mode)
+    expected_dim = int(angle_feature_dim or angle_feature_dim_for_mode(mode))
+    existing_features = sample.get("angle_features")
+    if existing_features is not None:
+        existing_dim = sample.get("angle_feature_dim")
+        if existing_dim is None and existing_features:
+            existing_dim = len(existing_features[0])
+        if int(existing_dim or -1) == expected_dim:
+            return sample
     word_payloads = sample.get("word_payloads") or []
-    features, debug = build_angle_features_for_words(
+    result = build_angle_features_for_words(
         word_payloads,
         boxes=sample.get("boxes") or [],
         image_width=sample.get("width"),
         image_height=sample.get("height"),
+        mode=mode,
+        max_abs_angle_deg=max_abs_angle_deg,
+        page_angle_deg=sample.get("rotation_deg"),
     )
+    features = result["angle_features"]
+    debug = result["word_angles"]
     if not features:
-        features = [[0.0] * ANGLE_FEATURE_DIM for _ in sample.get("words", [])]
+        features = [[0.0] * expected_dim for _ in sample.get("words", [])]
         debug = [
-            {"word_idx": idx, "angle_deg": None, "has_angle": False, "quad_source": None, "feature_dim": ANGLE_FEATURE_DIM}
+            {
+                "word_idx": idx,
+                "angle_deg": None,
+                "has_angle": False,
+                "quad_source": None,
+                "feature_dim": expected_dim,
+                "angle_encoding_mode": mode,
+            }
             for idx in range(len(features))
         ]
     sample["angle_features"] = features
     sample["angle_debug"] = debug
+    sample["angle_feature_dim"] = expected_dim
+    sample["angle_encoding_mode"] = mode
     sample["num_words_with_angle"] = sum(1 for row in debug if row.get("has_angle"))
     sample["num_words_without_angle"] = len(features) - sample["num_words_with_angle"]
     return sample
@@ -51,6 +80,9 @@ def encoding_with_angle_features(
     *,
     include_labels: bool = True,
     first_subword_only: bool = False,
+    angle_encoding_mode: str | None = "sincos_scalar",
+    angle_feature_dim: int | None = None,
+    max_abs_angle_deg: float = 45.0,
 ):
     """Batch encode samples and add token-aligned ``angle_features``.
 
@@ -59,8 +91,15 @@ def encoding_with_angle_features(
     tensor that angle-aware models can consume.
     """
 
+    mode = normalize_angle_encoding_mode(angle_encoding_mode)
+    feature_dim = int(angle_feature_dim or angle_feature_dim_for_mode(mode))
     for sample in samples:
-        build_sample_angle_features(sample)
+        build_sample_angle_features(
+            sample,
+            angle_encoding_mode=mode,
+            angle_feature_dim=feature_dim,
+            max_abs_angle_deg=max_abs_angle_deg,
+        )
     kwargs = {
         "images": [sample["image"] for sample in samples],
         "text": [sample["words"] for sample in samples],
@@ -82,6 +121,7 @@ def encoding_with_angle_features(
         encoding,
         [sample.get("angle_features", []) for sample in samples],
         first_subword_only=first_subword_only,
+        feature_dim=feature_dim,
     )
     return encoding
 

@@ -21,13 +21,15 @@ Each word may also include optional angle-aware geometry:
 
 - `cornerPoints`: four `[x, y]` points from the OCR engine, in saved JPG pixel coordinates
 - `quad`: equivalent four-point quadrilateral, if the OCR/exporter uses this name
-- `angleDeg` or `angle_deg`: text baseline angle in degrees, normalized to `[-180, 180]`
+- `angleDeg` or `angle_deg`: text baseline angle in degrees. The Python
+  angle-aware pipeline normalizes this to the text-orientation range `[-90, 90)`.
 
 `box` remains required and is still the only geometry consumed by the standard
-LayoutLMv3 path. Angle-aware experiments use the optional 4-point geometry or
-angle value to build an extra token-aligned `angle_features` tensor. If these
-fields are missing, angle features are all zeros and existing behavior is
-unchanged.
+LayoutLMv3 path. Angle-aware checkpoints use the optional 4-point geometry or
+angle value to build an extra token-aligned `angle_features` tensor. The current
+`angle_quad` mode stores token angle, relative angle, relative quad offsets, quad
+area, and presence flags. If these fields are missing, angle features are all
+zeros and existing behavior is unchanged.
 
 ## Coordinate Space
 
