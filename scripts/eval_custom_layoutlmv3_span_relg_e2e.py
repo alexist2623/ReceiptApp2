@@ -21,7 +21,7 @@ from ml.span_relg.feature_cache import build_cache_sample
 from ml.span_relg.io_utils import load_json, resolve_field_vocab
 from ml.span_relg.metrics import aggregate_metrics
 from ml.span_relg.span_utils import bio_predictions_to_spans
-from ml.span_relg.visualization import draw_span_relg_overlay
+from ml.span_relg.visualization import draw_grouped_relation_mapping_overlay, draw_span_relg_overlay
 from scripts.build_user_span_relg_dataset import (
     assign_group_keys_from_relations,
     collect_label_pairs,
@@ -415,8 +415,22 @@ def main():
                     pred_edges, missed_edges = classify_edges(cache, probs, args.threshold)
                     overlay_edges = pred_edges + missed_edges
                     overlay_path = overlay_dir / f"{data_id}_pred_span_relg.png"
+                    graph_overlay_path = overlay_dir / f"{data_id}_pred_span_relg_graph.png"
                     debug_path = overlay_dir / f"{data_id}_pred_span_relg_debug.json"
-                    draw_span_relg_overlay(gold_sample["image"], cache, overlay_edges, overlay_path, title=f"{data_id} custom predicted rel-g")
+                    draw_grouped_relation_mapping_overlay(
+                        gold_sample["image"],
+                        cache,
+                        overlay_edges,
+                        overlay_path,
+                        title=f"{data_id} custom predicted rel-g grouped mapping",
+                    )
+                    draw_span_relg_overlay(
+                        gold_sample["image"],
+                        cache,
+                        overlay_edges,
+                        graph_overlay_path,
+                        title=f"{data_id} custom predicted rel-g graph",
+                    )
                     save_json(debug_path, {"data_id": data_id, "pred_edges": pred_edges, "missed_edges": missed_edges, "predicted_spans": filtered_spans, "decoded_items": decoded.get("items", []), "token_debug": layout["token_debug"]})
                     gallery.append(
                         {
