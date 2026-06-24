@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         description="Run PaddleOCR output through the current LayoutLMv3 + span rel-g pipeline and draw overlays."
     )
     parser.add_argument("--image", required=True)
+    parser.add_argument(
+        "--ocr_json",
+        default=None,
+        help="Use an existing OCR JSON with words[].text/box/quad instead of running PaddleOCR in this script.",
+    )
     parser.add_argument("--out_dir", default="outputs/paddleocr_current_model_pipeline")
     parser.add_argument("--layoutlm_checkpoint", default="models/layoutlmv3-angle-mixed-public-user-35ep/best")
     parser.add_argument(
@@ -55,6 +60,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--local_files_only", action="store_true")
+    parser.add_argument(
+        "--return_word_box",
+        action="store_true",
+        help="Use PaddleOCR recognizer with return_word_box=True and feed word-level boxes into LayoutLMv3/rel-g.",
+    )
     parser.add_argument("--max_text_len", type=int, default=24)
     parser.add_argument("--mobile_preview_width", type=int, default=1400)
     return parser.parse_args()
@@ -74,7 +84,102 @@ def load_image(path: Path) -> Image.Image:
     return ImageOps.exif_transpose(Image.open(path)).convert("RGB")
 
 
-def paddle_words_to_ocr_json(image: Image.Image, image_path: Path, paddle_model_dir: Path, out_path: Path) -> dict:
+def flatten_paddleocr3_word_boxes(res: dict, width: int, height: int) -> tuple[list[dict], int]:
+    text_words = res.get("text_word") or []
+    text_word_boxes = res.get("text_word_boxes") or []
+    rec_texts = res.get("rec_texts") or []
+    rec_scores = res.get("rec_scores") or []
+    words: list[dict] = []
+    skipped = 0
+
+    for line_idx, (line_words, line_boxes) in enumerate(zip(text_words, text_word_boxes)):
+        if not isinstance(line_words, list) or not isinstance(line_boxes, list):
+            skipped += 1
+            continue
+        for line_word_idx, (text, raw_box) in enumerate(zip(line_words, line_boxes)):
+            text = str(text or "").strip()
+            if not text or not isinstance(raw_box, list) or len(raw_box) != 4:
+                skipped += 1
+                continue
+            try:
+                box = [int(round(float(v))) for v in raw_box]
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            box = clamp_box(box, width, height)
+            if box is None:
+                skipped += 1
+                continue
+            words.append(
+                {
+                    "text": text,
+                    "box": box,
+                    "confidence": rec_scores[line_idx] if line_idx < len(rec_scores) else None,
+                    "source": "paddleocr3_return_word_box",
+                    "line_idx": line_idx,
+                    "line_word_idx": line_word_idx,
+                    "word_idx": len(words),
+                    "line_text": rec_texts[line_idx] if line_idx < len(rec_texts) else None,
+                }
+            )
+    return words, skipped
+
+
+def run_paddleocr3_return_word_box(image_path: Path, width: int, height: int) -> tuple[dict, dict]:
+    from paddleocr import PaddleOCR
+
+    ocr = PaddleOCR(
+        lang="en",
+        text_detection_model_name="PP-OCRv5_mobile_det",
+        text_recognition_model_name="PP-OCRv5_mobile_rec",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        return_word_box=True,
+    )
+    results = list(ocr.predict(str(image_path), return_word_box=True))
+    if not results:
+        fail("PaddleOCR returned no results.")
+    raw_json = results[0].json
+    res = raw_json.get("res") if isinstance(raw_json, dict) else None
+    if not isinstance(res, dict):
+        fail("PaddleOCR result JSON does not contain res dict.")
+    if res.get("return_word_box") is not True:
+        fail("PaddleOCR result did not confirm return_word_box=True.")
+    words, skipped = flatten_paddleocr3_word_boxes(res, width, height)
+    if not words:
+        fail("PaddleOCR returned no valid text_word_boxes.")
+    payload = {
+        "image_width": width,
+        "image_height": height,
+        "ocr_engine": "paddleocr3",
+        "coordinate_space": "image_pixels",
+        "return_word_box_requested": True,
+        "return_word_box_native_available": True,
+        "word_box_source": "PaddleOCR.result.res.text_word_boxes",
+        "raw_box_count": len(res.get("dt_polys") or []),
+        "line_count": len(res.get("rec_texts") or []),
+        "word_count": len(words),
+        "skipped_word_box_count": skipped,
+        "words": words,
+    }
+    return payload, raw_json
+
+
+def paddle_words_to_ocr_json(
+    image: Image.Image,
+    image_path: Path,
+    paddle_model_dir: Path,
+    out_path: Path,
+    *,
+    return_word_box: bool = False,
+) -> dict:
+    if return_word_box:
+        payload, raw_json = run_paddleocr3_return_word_box(image_path, image.width, image.height)
+        save_json(out_path, payload)
+        save_json(out_path.with_name(f"{out_path.stem}_raw_paddleocr3_result.json"), raw_json)
+        return payload
+
     paddle_boxes = run_paddle_ocr(image_path=image_path, model_dir=paddle_model_dir, recognize=True)
     words = []
     for item in paddle_boxes:
@@ -96,6 +201,8 @@ def paddle_words_to_ocr_json(image: Image.Image, image_path: Path, paddle_model_
         "image_height": image.height,
         "ocr_engine": "paddleocr",
         "coordinate_space": "image_pixels",
+        "return_word_box_requested": False,
+        "return_word_box_native_available": False,
         "raw_box_count": len(paddle_boxes),
         "words": words,
     }
@@ -188,10 +295,28 @@ def main() -> None:
 
     image = load_image(image_path)
     width, height = image.size
-    ocr_json_path = out_dir / f"{stem}_paddle_ocr_full.json"
-    ocr_payload = paddle_words_to_ocr_json(image, image_path, Path(args.paddle_model_dir), ocr_json_path)
+    if args.ocr_json:
+        source_ocr_json = Path(args.ocr_json)
+        if not source_ocr_json.exists():
+            fail(f"ocr_json not found: {source_ocr_json}")
+        mode_suffix = "external_ocr"
+        ocr_json_path = out_dir / f"{stem}_{source_ocr_json.stem}.json"
+        ocr_payload = json.loads(source_ocr_json.read_text(encoding="utf-8"))
+        save_json(ocr_json_path, ocr_payload)
+    else:
+        mode_suffix = "paddle_return_word_box" if args.return_word_box else "paddle"
+        ocr_json_path = out_dir / f"{stem}_{mode_suffix}_ocr_full.json"
+        ocr_payload = paddle_words_to_ocr_json(
+            image,
+            image_path,
+            Path(args.paddle_model_dir),
+            ocr_json_path,
+            return_word_box=args.return_word_box,
+        )
     words, boxes, normalized_boxes, word_payloads = prepare_words(ocr_payload, width, height)
-    print(f"paddle_raw_box_count: {ocr_payload['raw_box_count']}")
+    print(f"paddle_raw_box_count: {ocr_payload.get('raw_box_count')}")
+    print(f"return_word_box_requested: {ocr_payload.get('return_word_box_requested')}")
+    print(f"return_word_box_native_available: {ocr_payload.get('return_word_box_native_available')}")
     print(f"paddle_valid_word_count: {len(words)}")
 
     field_vocab = resolve_field_vocab(args.span_relg_dataset_dir, args.relg_checkpoint)
@@ -274,12 +399,12 @@ def main() -> None:
     label_counts = Counter(item["label"] for item in predictions)
     span_counts = Counter(span["field"] for span in filtered_spans)
 
-    prediction_json = out_dir / f"{stem}_paddle_layoutlmv3_prediction.json"
-    grouped_json = out_dir / f"{stem}_paddle_relg_grouped.json"
-    debug_json = out_dir / f"{stem}_paddle_pipeline_debug.json"
-    label_overlay = out_dir / f"{stem}_paddle_label_overlay.png"
-    mapping_overlay = out_dir / f"{stem}_paddle_mapping_overlay.png"
-    graph_overlay = out_dir / f"{stem}_paddle_relg_graph_overlay.png"
+    prediction_json = out_dir / f"{stem}_{mode_suffix}_layoutlmv3_prediction.json"
+    grouped_json = out_dir / f"{stem}_{mode_suffix}_relg_grouped.json"
+    debug_json = out_dir / f"{stem}_{mode_suffix}_pipeline_debug.json"
+    label_overlay = out_dir / f"{stem}_{mode_suffix}_label_overlay.png"
+    mapping_overlay = out_dir / f"{stem}_{mode_suffix}_mapping_overlay.png"
+    graph_overlay = out_dir / f"{stem}_{mode_suffix}_relg_graph_overlay.png"
 
     save_json(
         prediction_json,
@@ -287,6 +412,8 @@ def main() -> None:
             "image_path": str(image_path),
             "ocr_json_path": str(ocr_json_path),
             "layoutlm_checkpoint": args.layoutlm_checkpoint,
+            "return_word_box_requested": args.return_word_box,
+            "return_word_box_native_available": ocr_payload.get("return_word_box_native_available"),
             "num_words": len(words),
             "predictions": predictions,
             "label_counts": dict(label_counts),
@@ -301,6 +428,8 @@ def main() -> None:
             "ocr_json_path": str(ocr_json_path),
             "layoutlm_checkpoint": args.layoutlm_checkpoint,
             "relg_checkpoint": args.relg_checkpoint,
+            "return_word_box_requested": args.return_word_box,
+            "return_word_box_native_available": ocr_payload.get("return_word_box_native_available"),
             "threshold": args.threshold,
             "num_words": len(words),
             "num_spans": len(filtered_spans),

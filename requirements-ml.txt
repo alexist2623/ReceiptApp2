@@ -4,6 +4,8 @@ matplotlib
 numpy
 onnx
 onnxruntime
+paddleocr==3.7.0
+paddlepaddle==3.0.0
 pandas
 pillow
 scikit-learn
