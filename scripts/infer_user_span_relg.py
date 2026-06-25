@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--relg_checkpoint", default="models/span-relg-context/best")
     parser.add_argument("--out_json", default=None)
     parser.add_argument("--out_overlay", default=None)
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--local_files_only", action="store_true")

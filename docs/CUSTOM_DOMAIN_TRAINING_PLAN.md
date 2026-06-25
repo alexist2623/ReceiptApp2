@@ -147,7 +147,7 @@ python scripts/eval_span_relg.py \
   --dataset_dir processed_data/user_span_relg_mixed_public_user \
   --checkpoint models/span-relg-context/best \
   --split validation \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --out_dir outputs/span_relg_eval_custom \
   --device auto \
   --debug
@@ -163,7 +163,7 @@ python scripts/eval_custom_layoutlmv3_span_relg_e2e.py \
   --layoutlm_checkpoint models/layoutlmv3-mixed-public-user/best \
   --relg_checkpoint models/span-relg-context/best \
   --span_relg_dataset_dir processed_data/user_span_relg_mixed_public_user \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --out_dir outputs/custom_predicted_span_relg_e2e \
   --device auto \
   --local_files_only \

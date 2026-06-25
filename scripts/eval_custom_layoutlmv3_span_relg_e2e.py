@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument("--split", default="all", choices=("train", "validation", "test", "all"))
     parser.add_argument("--label_schema", default="schemas/receipt_labels_v2.json")
     parser.add_argument("--exclude_dir_name", default="Temp")
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--out_dir", default="outputs/custom_predicted_span_relg_e2e")
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--max_length", type=int, default=512)

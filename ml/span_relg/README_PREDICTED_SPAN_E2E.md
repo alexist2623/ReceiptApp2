@@ -40,7 +40,7 @@ python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
   --checkpoint models/span-relg-context/best \
   --split test \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --out_dir outputs/span_relg_eval \
   --device auto \
   --debug
@@ -73,7 +73,7 @@ python scripts/eval_predicted_span_relg_e2e.py \
   --relg_checkpoint models/span-relg-context/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --max_samples 10 \
   --out_dir outputs/predicted_span_relg_e2e_debug \
   --device auto \
@@ -90,7 +90,7 @@ python scripts/eval_predicted_span_relg_e2e.py \
   --relg_checkpoint models/span-relg-context/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --out_dir outputs/predicted_span_relg_e2e \
   --device auto \
   --local_files_only \

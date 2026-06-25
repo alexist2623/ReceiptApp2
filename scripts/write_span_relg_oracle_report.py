@@ -80,7 +80,7 @@ def main():
         f"- resolved config path: `{run_config.get('resolved_config_path', 'n/a')}`",
         f"- test sample count: {metrics.get('num_samples')}",
         "",
-        "## Threshold 0.5 Metrics",
+        f"## Threshold {metrics.get('threshold', 'selected')} Metrics",
         "",
         f"- edge precision/recall/F1: {metric(metrics, 'edge_precision')} / {metric(metrics, 'edge_recall')} / {metric(metrics, 'edge_f1')}",
         f"- MENU_NM -> MENU_PRICE precision/recall/F1: {metric(metrics, 'menu_price_pair_precision')} / {metric(metrics, 'menu_price_pair_recall')} / {metric(metrics, 'menu_price_pair_f1')}",

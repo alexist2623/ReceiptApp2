@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument("--relg_checkpoint", default="models/span-relg-context/best")
     parser.add_argument("--span_relg_dataset_dir", default="processed_data/span_relg")
     parser.add_argument("--split", default="test")
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--out_dir", default="outputs/predicted_span_relg_e2e")
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--max_length", type=int, default=512)

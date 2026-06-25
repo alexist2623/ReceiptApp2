@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("--split_manifest", default=None)
     parser.add_argument("--split", default="all", choices=("train", "validation", "test", "all"))
     parser.add_argument("--exclude_dir_name", default="Temp")
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--out_dir", default="outputs/quantization/custom_onnx_e2e")
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--max_length", type=int, default=512)

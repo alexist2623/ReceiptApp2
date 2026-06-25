@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
         default="processed_data/span_relg_cord_wild_custom_angle_mixed_public_user_35ep",
     )
     parser.add_argument("--paddle_model_dir", default="tools/receipt_ocr_compare/models")
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--local_files_only", action="store_true")

@@ -12,7 +12,7 @@ def prf(tp, fp, fn):
     return {"precision": precision, "recall": recall, "f1": f1, "tp": tp, "fp": fp, "fn": fn}
 
 
-def binary_edge_metrics(labels, probs, threshold=0.5):
+def binary_edge_metrics(labels, probs, threshold=0.8):
     preds = [1 if float(prob) >= threshold else 0 for prob in probs]
     labels = [int(label) for label in labels]
     tp = sum(1 for y, p in zip(labels, preds) if y == 1 and p == 1)
@@ -24,7 +24,7 @@ def binary_edge_metrics(labels, probs, threshold=0.5):
     return out
 
 
-def field_edge_metrics(samples, probs_by_sample, threshold=0.5, fields=None):
+def field_edge_metrics(samples, probs_by_sample, threshold=0.8, fields=None):
     if fields is None:
         fields = DEP_FIELDS
     totals = {field: {"tp": 0, "fp": 0, "fn": 0} for field in fields}
@@ -44,7 +44,7 @@ def field_edge_metrics(samples, probs_by_sample, threshold=0.5, fields=None):
     return {field: prf(**counts) for field, counts in totals.items()}
 
 
-def _edge_sets(sample, probs, threshold=0.5, dep_field="MENU_PRICE"):
+def _edge_sets(sample, probs, threshold=0.8, dep_field="MENU_PRICE"):
     dep_field = canonicalize_field(dep_field)
     gold = set()
     pred = set()
@@ -59,11 +59,11 @@ def _edge_sets(sample, probs, threshold=0.5, dep_field="MENU_PRICE"):
     return gold, pred
 
 
-def menu_price_pair_metrics(samples, probs_by_sample, threshold=0.5):
+def menu_price_pair_metrics(samples, probs_by_sample, threshold=0.8):
     return item_price_pair_metrics(samples, probs_by_sample, threshold)
 
 
-def item_price_pair_metrics(samples, probs_by_sample, threshold=0.5):
+def item_price_pair_metrics(samples, probs_by_sample, threshold=0.8):
     tp = fp = fn = 0
     for sample, probs in zip(samples, probs_by_sample):
         gold, pred = _edge_sets(sample, probs, threshold, "ITEM_PRICE")
@@ -73,7 +73,7 @@ def item_price_pair_metrics(samples, probs_by_sample, threshold=0.5):
     return prf(tp, fp, fn)
 
 
-def fields_pair_metrics(samples, probs_by_sample, fields, threshold=0.5):
+def fields_pair_metrics(samples, probs_by_sample, fields, threshold=0.8):
     fields = {canonicalize_field(field) for field in fields}
     tp = fp = fn = 0
     for sample, probs in zip(samples, probs_by_sample):
@@ -91,7 +91,7 @@ def fields_pair_metrics(samples, probs_by_sample, fields, threshold=0.5):
     return prf(tp, fp, fn)
 
 
-def summary_amount_pair_metrics(samples, probs_by_sample, threshold=0.5):
+def summary_amount_pair_metrics(samples, probs_by_sample, threshold=0.8):
     return fields_pair_metrics(samples, probs_by_sample, SUMMARY_DEP_FIELDS, threshold)
 
 
@@ -99,7 +99,7 @@ def normalized_text(value):
     return re.sub(r"\s+", " ", str(value).strip().lower())
 
 
-def hard_negative_false_positives(samples, probs_by_sample, threshold=0.5):
+def hard_negative_false_positives(samples, probs_by_sample, threshold=0.8):
     count = 0
     store_count = 0
     total_subtotal_count = 0
@@ -157,7 +157,7 @@ def hard_negative_false_positives(samples, probs_by_sample, threshold=0.5):
     }
 
 
-def dependent_collision_count(samples, probs_by_sample, threshold=0.5):
+def dependent_collision_count(samples, probs_by_sample, threshold=0.8):
     total = 0
     for sample, probs in zip(samples, probs_by_sample):
         selected = Counter()
@@ -168,7 +168,7 @@ def dependent_collision_count(samples, probs_by_sample, threshold=0.5):
     return total
 
 
-def aggregate_metrics(samples, probs_by_sample, threshold=0.5):
+def aggregate_metrics(samples, probs_by_sample, threshold=0.8):
     labels = []
     probs = []
     for sample, sample_probs in zip(samples, probs_by_sample):

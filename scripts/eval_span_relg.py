@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--dataset_dir", default="processed_data/span_relg")
     parser.add_argument("--checkpoint", default="models/span-relg-context/best")
     parser.add_argument("--split", default="test")
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--out_dir", default="outputs/span_relg_eval")

@@ -100,7 +100,7 @@ C. evaluate_relg_with_quantized_layout_hidden.py
 --dataset_dir processed_data/span_relg_cord_onnx_int8_dynamic
 --relg_checkpoint models/span-relg-context/best
 --split validation
---threshold 0.5
+--threshold 0.8
 
 기능:
 - existing `scripts/train_span_relg.py`의 evaluate 로직 또는 `scripts/visualize_span_relg.py`의 model load/run_one 로직을 재사용.
@@ -202,7 +202,7 @@ python scripts/quantization/evaluate_relg_with_quantized_layout_hidden.py \
   --dataset_dir processed_data/span_relg_cord_onnx_int8_dynamic \
   --relg_checkpoint models/span-relg-context/best \
   --split validation \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --device cuda \
   --out_dir outputs/quantization/cord_relg_hidden_impact \
   --debug

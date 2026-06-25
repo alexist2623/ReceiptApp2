@@ -140,7 +140,7 @@ python scripts/eval_predicted_span_relg_e2e.py \
   --relg_checkpoint models/span-relg-context/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --out_dir outputs/predicted_span_relg_e2e_angle \
   --device auto \
   --local_files_only \

@@ -103,7 +103,7 @@ python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
   --checkpoint models/span-relg-context/best \
   --split test \
-  --threshold 0.5 \
+  --threshold 0.8 \
   --out_dir outputs/span_relg_eval \
   --device auto \
   --debug
