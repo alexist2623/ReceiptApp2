@@ -19,7 +19,7 @@ No OCR, training, or fine-tuning is performed in this step.
 - The Android ZIP has already been extracted.
 - WSL conda env `receipt-ml` is used.
 - `models/layoutlmv3-cord-full/best/` exists.
-- `models/span-relg-context/best/` exists.
+- `models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best/` exists.
 - `processed_data/cord_bio/labels.json` exists.
 
 Environment:
@@ -100,7 +100,7 @@ Replace `path/to/unzipped_receipt_export` with the actual extracted folder:
 python scripts/test_exported_receipt_zip.py \
   --input_dir path/to/unzipped_receipt_export \
   --layoutlm_checkpoint models/layoutlmv3-cord-full/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --labels processed_data/cord_bio/labels.json \
   --out_dir outputs/exported_receipt_zip_test \
   --device auto \

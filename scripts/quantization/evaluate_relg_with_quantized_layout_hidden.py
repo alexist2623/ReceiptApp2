@@ -24,9 +24,9 @@ from scripts.eval_span_relg import (
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate rel-g checkpoint with ONNX-derived LayoutLMv3 hidden cache.")
     parser.add_argument("--dataset_dir", default="processed_data/span_relg_cord_onnx_int8_dynamic")
-    parser.add_argument("--relg_checkpoint", default="models/span-relg-context/best")
+    parser.add_argument("--relg_checkpoint", default="models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best")
     parser.add_argument("--split", default="validation")
-    parser.add_argument("--threshold", type=float, default=0.8)
+    parser.add_argument("--threshold", type=float, default=0.84)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--out_dir", default="outputs/quantization/cord_relg_hidden_impact")

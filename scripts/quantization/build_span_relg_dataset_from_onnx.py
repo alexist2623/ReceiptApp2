@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument("--onnx_model", required=True)
     parser.add_argument("--checkpoint_for_processor", default="models/layoutlmv3-cord-full/best")
     parser.add_argument("--schema_source_dir", default="processed_data/span_relg")
-    parser.add_argument("--relg_checkpoint", default="models/span-relg-context/best")
+    parser.add_argument("--relg_checkpoint", default="models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best")
     parser.add_argument("--out_dir", default="processed_data/span_relg_cord_onnx_int8_dynamic")
     parser.add_argument("--split", default="validation")
     parser.add_argument("--max_samples", type=int, default=100)

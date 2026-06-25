@@ -36,7 +36,7 @@ def parse_args():
     )
     parser.add_argument("--input_dir", required=True, help="Directory created by unzipping the Android export ZIP.")
     parser.add_argument("--layoutlm_checkpoint", default="models/layoutlmv3-cord-full/best")
-    parser.add_argument("--relg_checkpoint", default="models/span-relg-context/best")
+    parser.add_argument("--relg_checkpoint", default="models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best")
     parser.add_argument("--labels", default="processed_data/cord_bio/labels.json")
     parser.add_argument("--out_dir", default="outputs/exported_receipt_zip_test")
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))

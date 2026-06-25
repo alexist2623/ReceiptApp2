@@ -63,7 +63,7 @@ data class RelGEdge(
 )
 
 object SpanRelGPipeline {
-    private const val THRESHOLD = 0.8f
+    private const val THRESHOLD = 0.84f
     private const val HIDDEN_DIM = 768
 
     fun buildResponse(

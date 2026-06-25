@@ -137,10 +137,10 @@ Standard checkpoints continue to work without any angle tensor.
 python scripts/eval_predicted_span_relg_e2e.py \
   --raw_data_dir ../receipt_training_data2 \
   --layoutlm_checkpoint models/layoutlmv3-angle-mixed-cord-user-non-temp/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --out_dir outputs/predicted_span_relg_e2e_angle \
   --device auto \
   --local_files_only \

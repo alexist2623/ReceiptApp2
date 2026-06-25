@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--num_layers", type=int, default=5)
     parser.add_argument("--num_heads", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--threshold", type=float, default=0.8)
+    parser.add_argument("--threshold", type=float, default=0.84)
     parser.add_argument(
         "--pos_weight_scale",
         type=float,

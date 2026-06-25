@@ -33,21 +33,21 @@ Expected Python:
 ```bash
 python scripts/debug_span_relg_paths.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test
 
 python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --out_dir outputs/span_relg_eval \
   --device auto \
   --debug
 
 python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
   --out_dir outputs/span_relg_eval_sweep \
   --device auto \
@@ -70,10 +70,10 @@ Oracle outputs:
 python scripts/eval_predicted_span_relg_e2e.py \
   --raw_data_dir ../receipt_training_data2 \
   --layoutlm_checkpoint models/layoutlmv3-cord-full/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --max_samples 10 \
   --out_dir outputs/predicted_span_relg_e2e_debug \
   --device auto \
@@ -87,10 +87,10 @@ python scripts/eval_predicted_span_relg_e2e.py \
 python scripts/eval_predicted_span_relg_e2e.py \
   --raw_data_dir ../receipt_training_data2 \
   --layoutlm_checkpoint models/layoutlmv3-cord-full/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --out_dir outputs/predicted_span_relg_e2e \
   --device auto \
   --local_files_only \
@@ -103,7 +103,7 @@ python scripts/eval_predicted_span_relg_e2e.py \
 python scripts/eval_predicted_span_relg_e2e.py \
   --raw_data_dir ../receipt_training_data2 \
   --layoutlm_checkpoint models/layoutlmv3-cord-full/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --span_relg_dataset_dir processed_data/span_relg \
   --split test \
   --out_dir outputs/predicted_span_relg_e2e_sweep \

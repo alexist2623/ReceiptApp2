@@ -101,9 +101,9 @@ The saved `best/` checkpoint is selected by validation `MENU_PRICE` pair F1 by d
 ```bash
 python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --out_dir outputs/span_relg_eval \
   --device auto \
   --debug
@@ -115,7 +115,7 @@ python scripts/eval_span_relg.py \
 python scripts/visualize_span_relg.py \
   --raw_data_dir ../receipt_training_data2 \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
   --index 0 \
   --out_dir outputs/span_relg_overlay \
@@ -129,7 +129,7 @@ python scripts/visualize_span_relg.py \
 python scripts/infer_user_span_relg.py \
   --prediction_json outputs/user_ocr_inference/receipt_001_prediction.json \
   --layoutlm_checkpoint models/layoutlmv3-cord-full/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --out_json outputs/user_ocr_inference/receipt_001_grouped_relg.json \
   --device auto \
   --local_files_only \

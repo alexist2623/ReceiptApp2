@@ -190,7 +190,7 @@ def _select_edges(pair_probs, pairs, pair_meta, threshold, collision_strategy):
     return deduped
 
 
-def decode_edges_to_items(sample, pair_probs, threshold=0.8, collision_strategy="best_dep"):
+def decode_edges_to_items(sample, pair_probs, threshold=0.84, collision_strategy="best_dep"):
     nodes = sample["nodes"]
     pairs = sample["candidate_pairs"].tolist() if hasattr(sample["candidate_pairs"], "tolist") else sample["candidate_pairs"]
     pair_meta = sample.get("pair_meta", [])

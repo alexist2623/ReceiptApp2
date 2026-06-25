@@ -20,7 +20,7 @@ from ml.span_relg.io_utils import (
 def parse_args():
     parser = argparse.ArgumentParser(description="Debug span rel-g cache/checkpoint path resolution.")
     parser.add_argument("--dataset_dir", default="processed_data/span_relg")
-    parser.add_argument("--checkpoint", default="models/span-relg-context/best")
+    parser.add_argument("--checkpoint", default="models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best")
     parser.add_argument("--split", default="test")
     return parser.parse_args()
 

@@ -35,7 +35,7 @@ python scripts/batch_infer_user_ocr_json.py \
 python scripts/infer_user_span_relg.py \
   --prediction_json outputs/user_ocr_batch_inference/predictions/<capture_id>_prediction.json \
   --layoutlm_checkpoint models/layoutlmv3-cord-full/best \
-  --relg_checkpoint models/span-relg-context/best \
+  --relg_checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --out_json outputs/user_ocr_batch_inference/<capture_id>_grouped_relg.json \
   --device auto \
   --local_files_only \

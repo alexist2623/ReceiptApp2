@@ -14,7 +14,7 @@ The main checks are:
 ## Prerequisites
 
 - `processed_data/span_relg/` exists.
-- `models/span-relg-context/best/model.pt` exists.
+- `models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best/model.pt` exists.
 - `../receipt_training_data2/` exists for image overlays.
 - Run in WSL with the `receipt-ml` conda environment.
 
@@ -23,11 +23,11 @@ This repo's span-relg cache may not be a single `test.pt` file. The evaluation s
 Field vocabulary is resolved from the first available source:
 
 1. `processed_data/span_relg/field_vocab.json`
-2. `models/span-relg-context/best/field_vocab.json`
+2. `models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best/field_vocab.json`
 3. `processed_data/span_relg/schema.json`
-4. `models/span-relg-context/best/schema.json`
+4. `models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best/schema.json`
 5. `processed_data/span_relg/manifest.json`
-6. `models/span-relg-context/best/config.json` or `model_config.json`
+6. `models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best/config.json` or `model_config.json`
 
 ## Environment
 
@@ -50,7 +50,7 @@ Run this before evaluation when cache/checkpoint layout changes:
 ```bash
 python scripts/debug_span_relg_paths.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test
 ```
 
@@ -61,9 +61,9 @@ It prints the resolved split cache path, sample count estimate, config path, fie
 ```bash
 python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --out_dir outputs/span_relg_eval \
   --device auto \
   --debug
@@ -83,7 +83,7 @@ Key outputs:
 ```bash
 python scripts/eval_span_relg.py \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
   --out_dir outputs/span_relg_eval_sweep \
   --device auto \
@@ -103,10 +103,10 @@ The best threshold is selected by MENU_NM -> MENU_PRICE pair F1.
 python scripts/visualize_span_relg.py \
   --raw_data_dir ../receipt_training_data2 \
   --dataset_dir processed_data/span_relg \
-  --checkpoint models/span-relg-context/best \
+  --checkpoint models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best \
   --split test \
   --index 0 \
-  --threshold 0.8 \
+  --threshold 0.84 \
   --out_dir outputs/span_relg_overlay \
   --device auto \
   --debug

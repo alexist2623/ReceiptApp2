@@ -37,7 +37,7 @@ def load_json(path):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Export the trained span-level rel-g parser to ONNX.")
-    parser.add_argument("--checkpoint", default="models/span-relg-item-policy-mixed/best")
+    parser.add_argument("--checkpoint", default="models/span-relg-f1search-2layer-itempricew2-resume-lr5e5-50ep/best")
     parser.add_argument("--out_dir", default="models/layoutlmv3-item-policy-onnx/int8_dynamic")
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--sample_nodes", type=int, default=64)
