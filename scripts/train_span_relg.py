@@ -33,6 +33,24 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument(
+        "--pos_weight_scale",
+        type=float,
+        default=1.0,
+        help="Multiplier applied to the auto-computed negative/positive BCE pos_weight.",
+    )
+    parser.add_argument(
+        "--item_price_loss_weight",
+        type=float,
+        default=1.0,
+        help="Extra loss multiplier for ITEM_PRICE candidate pairs.",
+    )
+    parser.add_argument(
+        "--item_price_rank_loss_weight",
+        type=float,
+        default=0.0,
+        help="Extra grouped ranking loss weight for ITEM_PRICE candidates sharing the same item head.",
+    )
+    parser.add_argument(
         "--best_metric",
         default="menu_price_pair_f1",
         choices=("item_price_pair_f1", "menu_price_pair_f1", "summary_amount_pair_f1", "edge_f1", "eval_loss"),
@@ -116,6 +134,7 @@ def collate_graphs(samples):
     node_mask = torch.zeros(batch_size, max_nodes, dtype=torch.bool)
     pair_rows = []
     pair_labels = []
+    pair_fields = []
     pair_counts = []
     for batch_idx, sample in enumerate(samples):
         n_nodes = int(sample["node_hidden"].shape[0])
@@ -131,6 +150,7 @@ def collate_graphs(samples):
             batch_col = torch.full((pairs.shape[0], 1), batch_idx, dtype=torch.long)
             pair_rows.append(torch.cat([batch_col, pairs], dim=1))
             pair_labels.append(labels)
+            pair_fields.extend(sample.get("pair_fields", [""] * pairs.shape[0]))
     if pair_rows:
         candidate_pairs = torch.cat(pair_rows, dim=0)
         labels = torch.cat(pair_labels, dim=0)
@@ -146,6 +166,7 @@ def collate_graphs(samples):
         "node_mask": node_mask,
         "candidate_pairs": candidate_pairs,
         "pair_labels": labels,
+        "pair_fields": pair_fields,
         "pair_counts": pair_counts,
     }
 
@@ -175,6 +196,47 @@ def split_probs_by_sample(probs, pair_counts):
         out.append(probs[offset : offset + count])
         offset += count
     return out
+
+
+def pair_loss_weights(pair_fields, item_price_loss_weight, device):
+    if item_price_loss_weight == 1.0:
+        return None
+    weights = [
+        float(item_price_loss_weight) if str(field).upper() in {"ITEM_PRICE", "MENU_PRICE"} else 1.0
+        for field in pair_fields
+    ]
+    return torch.tensor(weights, dtype=torch.float32, device=device)
+
+
+def item_price_rank_loss(logits, labels, candidate_pairs, pair_fields):
+    item_price_indices = [
+        idx
+        for idx, field in enumerate(pair_fields)
+        if str(field).upper() in {"ITEM_PRICE", "MENU_PRICE"}
+    ]
+    if not item_price_indices:
+        return logits.new_tensor(0.0)
+
+    groups = {}
+    for idx in item_price_indices:
+        batch_idx = int(candidate_pairs[idx, 0].item())
+        head_idx = int(candidate_pairs[idx, 1].item())
+        groups.setdefault((batch_idx, head_idx), []).append(idx)
+
+    losses = []
+    for indices in groups.values():
+        index_tensor = torch.tensor(indices, dtype=torch.long, device=logits.device)
+        group_labels = labels.index_select(0, index_tensor)
+        if group_labels.sum().item() <= 0:
+            continue
+        group_logits = logits.index_select(0, index_tensor)
+        pos_logits = group_logits[group_labels > 0.5]
+        # Multi-positive softmax loss: maximize probability mass assigned to gold price candidates.
+        losses.append(torch.logsumexp(group_logits, dim=0) - torch.logsumexp(pos_logits, dim=0))
+
+    if not losses:
+        return logits.new_tensor(0.0)
+    return torch.stack(losses).mean()
 
 
 def evaluate(model, loader, device, threshold):
@@ -382,9 +444,13 @@ def main():
         labels = sample["pair_labels"]
         total_pos += int(labels.sum().item())
         total_neg += int(labels.numel() - labels.sum().item())
-    pos_weight = torch.tensor([total_neg / max(total_pos, 1)], dtype=torch.float32, device=device)
+    raw_pos_weight = total_neg / max(total_pos, 1)
+    scaled_pos_weight = raw_pos_weight * args.pos_weight_scale
+    pos_weight = torch.tensor([scaled_pos_weight], dtype=torch.float32, device=device)
     print(f"train positive pairs: {total_pos}")
     print(f"train negative pairs: {total_neg}")
+    print(f"raw_pos_weight: {raw_pos_weight:.4f}")
+    print(f"pos_weight_scale: {args.pos_weight_scale:.4f}")
     print(f"pos_weight: {pos_weight.item():.4f}")
 
     history = []
@@ -401,8 +467,17 @@ def main():
             if batch["candidate_pairs"].numel() == 0:
                 continue
             model_batch = move_batch(batch, device)
-            output = model(**model_batch, pos_weight=pos_weight)
+            loss_weights = pair_loss_weights(batch["pair_fields"], args.item_price_loss_weight, device)
+            output = model(**model_batch, pos_weight=pos_weight, pair_loss_weights=loss_weights)
             loss = output["loss"]
+            if args.item_price_rank_loss_weight > 0:
+                rank_loss = item_price_rank_loss(
+                    output["logits"],
+                    model_batch["pair_labels"],
+                    model_batch["candidate_pairs"],
+                    batch["pair_fields"],
+                )
+                loss = loss + float(args.item_price_rank_loss_weight) * rank_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -479,6 +554,9 @@ def main():
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
+        "pos_weight_scale": args.pos_weight_scale,
+        "item_price_loss_weight": args.item_price_loss_weight,
+        "item_price_rank_loss_weight": args.item_price_rank_loss_weight,
         "threshold": args.threshold,
         "best_metric": args.best_metric,
         "resume_from_checkpoint": args.resume_from_checkpoint,

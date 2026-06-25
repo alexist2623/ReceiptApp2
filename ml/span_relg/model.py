@@ -201,6 +201,7 @@ class SpanRelGModel(nn.Module):
         candidate_pairs,
         pair_labels=None,
         pos_weight=None,
+        pair_loss_weights=None,
     ):
         x = (
             self.hidden_proj(node_hidden)
@@ -213,10 +214,14 @@ class SpanRelGModel(nn.Module):
         logits = self.scorer(z, node_boxes, candidate_pairs)
         output = {"logits": logits, "probs": torch.sigmoid(logits)}
         if pair_labels is not None:
-            output["loss"] = F.binary_cross_entropy_with_logits(
+            loss = F.binary_cross_entropy_with_logits(
                 logits,
                 pair_labels.float(),
                 pos_weight=pos_weight,
+                reduction="none" if pair_loss_weights is not None else "mean",
             )
+            if pair_loss_weights is not None:
+                weights = pair_loss_weights.float().to(loss.device)
+                loss = (loss * weights).sum() / weights.sum().clamp_min(1e-6)
+            output["loss"] = loss
         return output
-
