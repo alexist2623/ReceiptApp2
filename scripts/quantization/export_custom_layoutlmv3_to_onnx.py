@@ -13,6 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from ml.layoutlmv3_angle_model import load_angle_aware_token_classifier
 from scripts.quantization.custom_quant_common import encode_custom_sample, load_custom_records, prepare_custom_sample
 from scripts.quantization.quant_common import (
     fail,
@@ -79,14 +80,27 @@ def main():
     device = torch.device(args.device)
     out_dir = prepare_out_dir(args.out_dir, args.overwrite)
     onnx_path = out_dir / "model.onnx"
-    labels_payload, _, label2id, _ = load_labels(checkpoint)
+    labels_payload, label_list, label2id, id2label = load_labels(checkpoint)
     records, excluded = load_custom_records(args.input_dir, args.exclude_dir_name)
     if args.sample_index >= len(records):
         fail(f"sample_index {args.sample_index} out of range; records={len(records)}")
     sample = prepare_custom_sample(records[args.sample_index], label2id)
 
     processor = AutoProcessor.from_pretrained(str(checkpoint), apply_ocr=False, local_files_only=args.local_files_only)
-    model = AutoModelForTokenClassification.from_pretrained(str(checkpoint), local_files_only=args.local_files_only)
+    angle_config_path = checkpoint / "angle_model_config.json"
+    if angle_config_path.exists():
+        print(f"angle-aware checkpoint detected: {angle_config_path}")
+        print("export mode: 4-input ONNX with implicit zero angle_features for Android compatibility")
+        model = load_angle_aware_token_classifier(
+            str(checkpoint),
+            num_labels=len(label_list),
+            id2label=id2label,
+            label2id=label2id,
+            local_files_only=args.local_files_only,
+            ignore_mismatched_sizes=False,
+        )
+    else:
+        model = AutoModelForTokenClassification.from_pretrained(str(checkpoint), local_files_only=args.local_files_only)
     model.to(device)
     model.eval()
     wrapper = LayoutLMv3TokenAndHiddenWrapper(model).to(device).eval()
@@ -169,6 +183,12 @@ def main():
             "max_length": args.max_length,
             "outputs": ["logits", "last_hidden_state"],
             "inputs": ["input_ids", "attention_mask", "bbox", "pixel_values"],
+            "angle_aware_checkpoint": angle_config_path.exists(),
+            "angle_features_export_policy": (
+                "implicit_zero_angle_features_4_input_android_compat"
+                if angle_config_path.exists()
+                else "not_applicable"
+            ),
             "source": "custom-labeled-receipts",
             "user_data_used": True,
             "excluded_dir_name": args.exclude_dir_name,
