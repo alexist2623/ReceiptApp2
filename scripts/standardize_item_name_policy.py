@@ -14,7 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 from ml.receipt_schema import canonicalize_field, label_to_field, normalize_span_text
 
 
-POLICY_VERSION = "item_name_core_only_v2026_06_19"
+POLICY_VERSION = "item_name_core_only_v2026_06_26"
 RELATION_LIST_KEYS = ("relations", "item_relations", "summary_relations", "payment_relations", "rel_g_edges")
 PRICE_FIELDS = {
     "ITEM_PRICE",
@@ -55,6 +55,48 @@ OPTION_SPAN_PHRASES = {
     "REGULAR",
 }
 TAX_FLAG_TOKENS = {"T", "TX", "TAX", "G", "GP", "GST", "PST", "HST", "F", "N"}
+ITEM_CATEGORY_HEADER_TOKENS = {
+    "BEVERAGE",
+    "BEVERAGES",
+    "DRINK",
+    "DRINKS",
+    "FOOD",
+    "GROCERY",
+    "GROCERIES",
+    "MEAT",
+    "PRODUCE",
+    "DAIRY",
+    "DELI",
+    "BAKERY",
+    "SNACK",
+    "SNACKS",
+}
+ITEM_ETC_PLACEHOLDER_TOKENS = {
+    "OPENFOOD",
+    "OPENFOODS",
+    "OPENITEM",
+    "OPENITEMS",
+    "MISCITEM",
+    "MISCITEMS",
+    "MISC",
+    "COURSEWKDAY",
+}
+LOYALTY_OR_MEMBERSHIP_TOKENS = {
+    "AIRMILES",
+    "AIRMILE",
+    "AIRMILESCOLLECTOR",
+    "LOYALTY",
+    "REWARDS",
+    "REWARD",
+    "MEMBER",
+    "MEMBERSHIP",
+}
+SERVICE_NAME_TOKENS = {
+    "COPERTO",
+    "COVER",
+    "COVERCHARGE",
+    "SERVICECHARGE",
+}
 
 
 def parse_args():
@@ -186,6 +228,10 @@ def norm_text(text):
     return re.sub(r"\s+", " ", str(text or "").strip()).upper()
 
 
+def compact_text(text):
+    return re.sub(r"[^A-Z0-9]", "", norm_text(text))
+
+
 def is_price_like(text):
     value = norm_text(text)
     if not value:
@@ -212,6 +258,39 @@ def is_qty_like(text):
 def is_tax_flag(text):
     value = norm_text(text).strip("*")
     return value in TAX_FLAG_TOKENS
+
+
+def is_item_category_header_like(text):
+    compact = compact_text(text)
+    if compact in ITEM_CATEGORY_HEADER_TOKENS:
+        return True
+    without_leading_code = re.sub(r"^\d+", "", compact)
+    if without_leading_code in ITEM_CATEGORY_HEADER_TOKENS:
+        return True
+    # WildReceipt often appends tax/category suffixes to department headers, e.g. GROCERYFT2.
+    return bool(
+        re.fullmatch(r"(?:BEVERAGE|BEVERAGES|GROCERY|GROCERIES|MEAT|FOOD)(?:F|FT|TX|T)?\d{0,3}", compact)
+        or re.fullmatch(r"(?:GROCERY|GROCERIES)(?:NONFOOD|HO|HOME)?", without_leading_code)
+    )
+
+
+def is_item_placeholder_like(text):
+    compact = compact_text(text)
+    return compact in ITEM_ETC_PLACEHOLDER_TOKENS or compact.startswith("OPENFOOD") or compact.startswith("OPENITEM")
+
+
+def is_loyalty_or_membership_like(text):
+    compact = compact_text(text)
+    if compact in LOYALTY_OR_MEMBERSHIP_TOKENS:
+        return True
+    return compact.startswith("AIRMILES") or compact.startswith("BONUSAIRMILES")
+
+
+def is_service_name_like(text):
+    compact = compact_text(text)
+    if compact in SERVICE_NAME_TOKENS:
+        return True
+    return bool(re.fullmatch(r"\d+X?COPERTO", compact))
 
 
 def is_code_like(text):
@@ -365,6 +444,18 @@ def standardize_fields(words, original_fields, row_keys):
             if idx in option_indices:
                 new_field = "ITEM_OPTION"
                 reason = "item_name_span_is_option_phrase"
+            elif is_service_name_like(text):
+                new_field = "SERVICE_NAME"
+                reason = "service_name_like_token_inside_item_name"
+            elif is_loyalty_or_membership_like(text):
+                new_field = "PAYMENT_INFO"
+                reason = "loyalty_or_membership_token_inside_item_name"
+            elif is_item_placeholder_like(text):
+                new_field = "ITEM_ETC"
+                reason = "placeholder_token_inside_item_name"
+            elif is_item_category_header_like(text):
+                new_field = "ITEM_CATEGORY"
+                reason = "category_header_token_inside_item_name"
             elif is_size_or_pack_like(text):
                 new_field = "ITEM_OPTION"
                 reason = "size_or_pack_token_inside_item_name"
@@ -579,6 +670,7 @@ def update_relations(payload, words, fields):
         values = payload.get(key)
         if not isinstance(values, list):
             continue
+        kept_relations = []
         for ordinal, relation in enumerate(values):
             if not isinstance(relation, dict):
                 continue
@@ -587,19 +679,36 @@ def update_relations(payload, words, fields):
                 relation["relation_id"] = relation_id
             if "edge_id" not in relation and key == "rel_g_edges":
                 relation["edge_id"] = relation_id
+            drop_relation = False
             for side in ("head", "tail"):
                 indices = side_indices(relation, side)
                 field = side_field(relation, side)
                 if not indices:
                     relation_warnings.append({"relation_id": relation_id, "list": key, "side": side, "reason": "missing_indices"})
+                    drop_relation = True
                     continue
                 valid = [idx for idx in indices if 0 <= idx < len(words)]
                 if len(valid) != len(indices):
                     relation_warnings.append({"relation_id": relation_id, "list": key, "side": side, "reason": "index_out_of_range"})
                 if not valid:
+                    drop_relation = True
                     continue
                 matching = [idx for idx in valid if fields[idx] == field]
-                if field != "O" and matching:
+                if field != "O":
+                    if not matching:
+                        relation_warnings.append(
+                            {
+                                "relation_id": relation_id,
+                                "list": key,
+                                "side": side,
+                                "reason": "no_indices_matching_declared_field_after_policy",
+                                "declared_field": field,
+                                "indices": valid,
+                                "actual_fields": [fields[idx] for idx in valid],
+                            }
+                        )
+                        drop_relation = True
+                        continue
                     if matching != valid:
                         relation_updates["side_indices_filtered"] += 1
                         set_side_indices(relation, side, matching)
@@ -609,6 +718,12 @@ def update_relations(payload, words, fields):
                 set_side_text(relation, side, text)
                 set_side_box(relation, side, box)
             relation_updates[f"{key}_seen"] += 1
+            if drop_relation:
+                relation_updates[f"{key}_removed_field_mismatch"] += 1
+            else:
+                kept_relations.append(relation)
+        if len(kept_relations) != len(values):
+            payload[key] = kept_relations
     return relation_updates, relation_warnings
 
 
@@ -705,6 +820,44 @@ def update_counts(payload, words):
         payload["relation_counts"] = dict(Counter(str(rel.get("relation_type", "unknown")) for rel in payload["relations"] if isinstance(rel, dict)))
 
 
+def cleanup_semantic_item_category_metadata(words, fields, payload):
+    updates = Counter()
+    word_keys = (
+        "semantic_item_category",
+        "semantic_item_category_confidence",
+        "semantic_item_category_rule",
+    )
+    for idx, word in enumerate(words):
+        if not isinstance(word, dict) or fields[idx] == "ITEM_NAME":
+            continue
+        removed = False
+        for key in word_keys:
+            if key in word:
+                word.pop(key, None)
+                removed = True
+        if removed:
+            updates["word_semantic_category_removed"] += 1
+
+    for relation_key in RELATION_LIST_KEYS:
+        relations = payload.get(relation_key)
+        if not isinstance(relations, list):
+            continue
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            if canonicalize_field(relation.get("head_field")) == "ITEM_NAME":
+                continue
+            for key in (
+                "head_semantic_item_category",
+                "head_semantic_item_category_confidence",
+                "head_semantic_item_category_rule",
+            ):
+                if key in relation:
+                    relation.pop(key, None)
+                    updates["relation_semantic_category_removed"] += 1
+    return updates
+
+
 def add_policy_metadata(payload, report):
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     policy = payload.get("label_policy")
@@ -740,6 +893,7 @@ def process_payload(payload):
     payload["spans"] = build_spans(words, new_labels, row_keys, width, height)
     relation_updates, relation_warnings = update_relations(payload, words, new_fields)
     item_group_updates = update_item_groups(payload, words, new_fields)
+    semantic_metadata_updates = cleanup_semantic_item_category_metadata(words, new_fields, payload)
     rebuild_word_relation_links(payload, words)
     update_counts(payload, words)
     transition_counts = Counter((change["old_field"], change["new_field"]) for change in word_changes)
@@ -747,12 +901,13 @@ def process_payload(payload):
         {key: value for key, value in relation_updates.items() if not str(key).endswith("_seen")}
     )
     report = {
-        "changed": bool(word_changes or material_relation_updates or item_group_updates),
+        "changed": bool(word_changes or material_relation_updates or item_group_updates or semantic_metadata_updates),
         "word_changes": word_changes,
         "transition_counts": transition_counts,
         "relation_updates": dict(relation_updates),
         "relation_warnings": relation_warnings,
         "item_group_updates": dict(item_group_updates),
+        "semantic_metadata_updates": dict(semantic_metadata_updates),
         "num_words": len(words),
         "num_spans": len(payload.get("spans") or []),
     }
@@ -828,6 +983,7 @@ def main():
         "reason_counts": {},
         "relation_update_counts": {},
         "item_group_update_counts": {},
+        "semantic_metadata_update_counts": {},
         "changed_examples": [],
         "files": [],
         "failures": [],
@@ -836,6 +992,7 @@ def main():
     reason_counts = Counter()
     relation_update_counts = Counter()
     item_group_update_counts = Counter()
+    semantic_metadata_update_counts = Counter()
     for index, path in enumerate(files, start=1):
         try:
             original = load_json(path)
@@ -853,6 +1010,7 @@ def main():
                 reason_counts.update(change["reason"] for change in file_report["word_changes"])
                 relation_update_counts.update(file_report["relation_updates"])
                 item_group_update_counts.update(file_report["item_group_updates"])
+                semantic_metadata_update_counts.update(file_report["semantic_metadata_updates"])
                 if len(report["changed_examples"]) < args.debug_examples:
                     report["changed_examples"].append(
                         {
@@ -861,6 +1019,7 @@ def main():
                             "word_changes": file_report["word_changes"][:20],
                             "relation_updates": file_report["relation_updates"],
                             "item_group_updates": file_report["item_group_updates"],
+                            "semantic_metadata_updates": file_report["semantic_metadata_updates"],
                             "relation_warnings": file_report["relation_warnings"][:20],
                         }
                     )
@@ -874,6 +1033,7 @@ def main():
                     "transition_counts": {f"{a}->{b}": c for (a, b), c in file_report["transition_counts"].items()},
                     "relation_updates": file_report["relation_updates"],
                     "item_group_updates": file_report["item_group_updates"],
+                    "semantic_metadata_updates": file_report["semantic_metadata_updates"],
                     "relation_warning_count": len(file_report["relation_warnings"]),
                 }
             )
@@ -888,6 +1048,7 @@ def main():
     report["reason_counts"] = dict(reason_counts)
     report["relation_update_counts"] = dict(relation_update_counts)
     report["item_group_update_counts"] = dict(item_group_update_counts)
+    report["semantic_metadata_update_counts"] = dict(semantic_metadata_update_counts)
     save_json(args.report_out, report)
     print(json.dumps({k: report[k] for k in (
         "mode",
@@ -899,6 +1060,7 @@ def main():
         "reason_counts",
         "relation_update_counts",
         "item_group_update_counts",
+        "semantic_metadata_update_counts",
     )}, ensure_ascii=False, indent=2))
     print(f"report path: {args.report_out}")
     if args.apply:

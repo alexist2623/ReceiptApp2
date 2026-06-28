@@ -107,7 +107,7 @@ def source_annotations(root, record, args, counters):
             counters["invalid_boxes"] += 1
             continue
         raw_label = annotation_label(ann, getattr(args, "class_id_to_label", {}))
-        field, reason = canonical_field_from_wild(raw_label, args.ignore_ambiguous_others)
+        field, reason = canonical_field_from_wild(raw_label, args.ignore_ambiguous_others, text=text)
         counters[f"map_reason:{reason}"] += 1
         words.append(text)
         boxes.append(box)

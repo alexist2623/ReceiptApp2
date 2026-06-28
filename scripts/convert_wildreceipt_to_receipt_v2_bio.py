@@ -12,6 +12,12 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from ml.receipt_schema import canonicalize_field, get_bio_label_list
+from scripts.standardize_item_name_policy import (
+    is_item_category_header_like,
+    is_item_placeholder_like,
+    is_loyalty_or_membership_like,
+    is_service_name_like,
+)
 
 
 IGNORE_LABEL = "IGNORE"
@@ -251,11 +257,27 @@ def annotation_label(annotation, class_id_to_label=None):
     return "Others"
 
 
-def canonical_field_from_wild(label, ignore_ambiguous_others=True):
+def repair_item_name_field_from_text(field, text):
+    field = canonicalize_field(field)
+    if field != "ITEM_NAME":
+        return field, None
+    if is_service_name_like(text):
+        return "SERVICE_NAME", "item_name_policy_service_name"
+    if is_loyalty_or_membership_like(text):
+        return "PAYMENT_INFO", "item_name_policy_loyalty_or_membership"
+    if is_item_placeholder_like(text):
+        return "ITEM_ETC", "item_name_policy_placeholder"
+    if is_item_category_header_like(text):
+        return "ITEM_CATEGORY", "item_name_policy_category_header"
+    return field, None
+
+
+def canonical_field_from_wild(label, ignore_ambiguous_others=True, text=None):
     raw = str(label or "").strip()
     normalized = raw.upper().replace("-", "_").replace(" ", "_")
     if normalized in VALUE_LABEL_MAP:
-        return canonicalize_field(VALUE_LABEL_MAP[normalized]), "mapped_value"
+        field, repair_reason = repair_item_name_field_from_text(VALUE_LABEL_MAP[normalized], text or "")
+        return field, repair_reason or "mapped_value"
     if normalized in KEY_LABEL_MAP:
         return canonicalize_field(KEY_LABEL_MAP[normalized]), "mapped_key"
     if normalized in {"O", "OTHER", "OTHERS", "IGNORE", "IGNORED"}:
@@ -320,7 +342,7 @@ def convert_record(root, record, split_name, index, args, counters):
             counters["invalid_boxes"] += 1
             continue
         raw_label = annotation_label(ann, getattr(args, "class_id_to_label", {}))
-        field, reason = canonical_field_from_wild(raw_label, args.ignore_ambiguous_others)
+        field, reason = canonical_field_from_wild(raw_label, args.ignore_ambiguous_others, text=text)
         counters[f"map_reason:{reason}"] += 1
         words.append(text)
         boxes.append(box)

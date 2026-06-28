@@ -1,0 +1,25 @@
+{
+  "schema_version": "item_semantic_categories_v1",
+  "categories": [
+    "FOOD",
+    "DRINK",
+    "GROCERY",
+    "SNACK",
+    "ALCOHOL",
+    "HOUSEHOLD",
+    "PERSONAL_CARE",
+    "HEALTH",
+    "CLOTHING",
+    "ELECTRONICS",
+    "TRANSPORT",
+    "SERVICE",
+    "ENTERTAINMENT",
+    "TAX_FEE",
+    "OTHER"
+  ],
+  "notes": [
+    "These are semantic item categories for item-level classification.",
+    "They are separate from receipt BIO fields such as ITEM_NAME, ITEM_PRICE, TAX_PRICE, and TOTAL_PRICE.",
+    "Do not replace ITEM_NAME BIO labels with these categories; attach these as span/item metadata."
+  ]
+}
